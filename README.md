@@ -1,87 +1,134 @@
 # HD2Lab | DOS Player (PKPilot0006)
 
-고전 DOS 게임을 설치 없이 브라우저에서 바로 실행하는 정적 인스턴트 플레이어. [js-dos v8](https://js-dos.com/)(DOSBox WebAssembly)이 에뮬레이터를 돌리고, 페이지는 GitHub Pages에서 정적으로 배포된다.
+A static instant player that runs classic DOS games in the browser with no install. [js-dos v8](https://js-dos.com/)
+(DOSBox compiled to WebAssembly) drives the emulator and the page is served statically from GitHub Pages.
 
-- 라이브: <https://hyangdan2.github.io/PKPilot0006/>
-- 계열: Web-HQ / PKPilot0001·0002·0003·0005 와 같은 HD2Lab 다크 스튜디오 테마(`#101110` · `#ff824f`)
-- 런타임: 빌드 없음. 서버 없음. 번들은 js-dos 공개 CDN에서, 내 파일은 브라우저 메모리에서만 읽는다
+- Live: <https://hyangdan2.github.io/PKPilot0006/>
+- Family: the same HD2Lab shell as Web-HQ and PKPilot0001–0005 (Soft Iris light, Navy & Lavender dark)
+- Runtime: no build, no server. The library comes from the public js-dos CDN; your own files are read only in
+  browser memory
 
-## 바로실행용 번들 (전부 실측 검증)
+## Instant-play bundles (all measured)
 
-| # | 번들 | 원작 | 크기 | 라이선스 | URL |
+| # | Bundle | Original | Size | Licence | URL |
 |---|------|------|------|----------|-----|
 | 1 | Digger | Windmill Software, 1983 | 26,875 B | Freeware | `https://v8.js-dos.com/bundles/digger.jsdos` |
-| 2 | DOOM (셰어웨어 Ep.1) | id Software, 1993 | 5,539,791 B | Shareware | `https://v8.js-dos.com/bundles/doom.jsdos` |
+| 2 | DOOM (shareware Ep.1) | id Software, 1993 | 5,539,791 B | Shareware | `https://v8.js-dos.com/bundles/doom.jsdos` |
 | 3 | Dhrystone 2 | R. P. Weicker (DOS/4GW) | 178,752 B | Benchmark | `https://v8.js-dos.com/bundles/dhry2.jsdos` |
 
-세 URL 모두 `curl` HTTP 200과 헤드리스 Chromium 실제 부팅(캔버스 생성 + 화면 렌더)까지 확인했다. `v8.js-dos.com/bundles/`는 `Origin`에 맞춰 `access-control-allow-origin`을 돌려주므로 GitHub Pages에서 CORS 문제가 없다. 그 밖의 후보 이름(keen4, prince, wolf3d, duke3d, tetris, sopwith 등 60여 개)은 이 CDN에서 404였다 — 공개 번들은 이 3종이 전부다.
+All three URLs were confirmed with `curl` HTTP 200 and a real headless Chromium boot (canvas created and screen
+rendered). `v8.js-dos.com/bundles/` returns `access-control-allow-origin` for the requesting origin, so there is no
+CORS problem from GitHub Pages. The other candidate names (keen4, prince, wolf3d, duke3d, tetris, sopwith and
+about 60 more) returned 404 on this CDN — those three bundles are all it publishes.
 
-## 기능
+## Features
 
-- **원클릭 부팅** — 첫 게임(Digger)이 자동 선택되고, 시작 베일의 `▶ 실행` 한 번이면 부팅. `Dos()` 호출을 사용자 클릭 안에서 하므로 브라우저 오디오 자동재생 정책에 걸리지 않는다
-- **번들 전환** — 라이브러리 카드 클릭 한 번으로 기존 인스턴스를 `stop()`하고 새 번들을 부팅
-- **내 파일 실행** — `.jsdos` / `.zip`을 드래그&드롭하거나 파일 선택. `URL.createObjectURL(file)`로 열고 페이지 어디에 떨어뜨려도 플레이어로 들어온다. 파일은 서버로 전송되지 않는다
-- **전체화면** — 화면 셸을 네이티브 Fullscreen API로 전환하고, 전체화면 안에서도 `전체화면 나가기` 버튼을 제공(Esc는 DOS가 가로챌 수 있다)
-- **입력 (js-dos CommandInterface 직결)** — `Dos(stage, { onEvent })`의 `"ci-ready"`에서 `ci`(CommandInterface)를 잡아 모든 키를 `ci.sendKeyEvent(kbdCode, pressed)`로 넣는다. 포커스가 캔버스 안에 있지 않아도, 캔버스를 한 번도 클릭하지 않아도 에뮬레이터에 바로 들어간다
-- **가상 게임패드** — 방향 · Enter · Space · Ctrl · Esc · Y · N에 더해 `Shift`(달리기) · `Alt`(옆걸음) · `1`~`4`(무기) 보조 줄. `pointerdown`에서 `setPointerCapture`로 누름을 붙잡고 `pointerup` · `pointercancel` · `lostpointercapture`에서만 놓는다(예전 `pointerleave` 해제는 손가락이 버튼을 살짝 벗어나면 이동이 끊겼다). 다중 터치(이동 + 사격) 동시 지원, `blur` · `visibilitychange` · `pagehide`에서 전체 해제로 키가 붙잡히지 않는다
-- **게임별 키 프로필** — 이 DOOM 셰어웨어 번들은 자체 `DEFAULT.CFG`를 싣고 있어 방향키 위·아래가 게임플레이에서 아무것도 하지 않는다(`key_up=W`, `key_down=S`, `key_strafeleft/right=A/D`, `key_left/right`=좌우 방향키, `key_fire=Ctrl`, `key_use=Space`, `key_speed=Shift`). 그래서 DOOM에서 d-pad ▲▼는 `W`+`↑`, ◀▶는 `←`/`→`를 보낸다 — 게임에서는 W/S로 걷고 메뉴에서는 방향키로 이동한다. Digger 등 나머지는 방향키 그대로
-- **PC 키보드 바인딩 (WASD 모드, 기본 켜짐·`localStorage` 기억)** — `W`/`A`/`S`/`D` → 이동, `J`·`Z` → `Ctrl`(사격), `K`·`X` → `Space`, `L`·`C` → `Enter`. 방향키 · `Ctrl` · `Space` · `Enter` · `Esc` · `1`~`7` · `Y`/`N`은 모드와 무관하게 항상 동작한다. 한 번 누른 키가 두 번 들어가지 않도록 js-dos의 `window` 키 리스너는 이 키들에서 `stopPropagation`으로 막고 직접 `ci.sendKeyEvent`만 부른다. 방향키·Space의 페이지 스크롤도 막는다
-- **가상 패드는 터치 기기 전용** — 마우스가 주 포인터인 화면(`@media (hover: hover) and (pointer: fine)`, `maxTouchPoints=0`)에서는 `.pad`를 감춘다. 터치 노트북처럼 둘 다 있는 기기를 위해 `⋮` 메뉴에 **`가상 게임패드 강제 표시`** 토글을 두었다(`localStorage` 기억)
-- **PC 키 설정 모달 (데스크톱)** — 플레이 바의 `키 설정` 버튼이 다크 테마 모달을 연다. 10개 동작(앞으로/뒤로/왼쪽/오른쪽/사격/사용/확인/달리기/스트레이프/메뉴)의 20개 키 칸을 누른 뒤 원하는 키를 누르면 `ci.sendKeyEvent`가 보내는 정확한 `KBD_*` 코드로 매핑된다. 다른 동작이 쓰는 키를 고르면 **서로 바꾸고 안내 문구를 띄운다**. `localStorage`(`pkpilot0006:keymap`)에 저장되고 플레이 바 아래 범례가 즉시 갱신된다. `기본값 초기화`·`닫기`, 모달이 열려 있는 동안 게임으로 키가 새지 않는다(`Esc` 취소 → 다시 `Esc` 닫기)
-- **모바일 가로 전체화면 오버레이** — 휴대폰을 가로로 돌리면(또는 가로 상태에서 전체화면) 헤더·히어로·사이드 패널·플레이 바를 감추고 캔버스가 `100vw × 100dvh`를 채운다. 반투명 D-pad(좌하)와 액션 버튼(우하)이 게임 위에 떠 있고(기본 `opacity .45`, 누르면 `.85`), `Shift`·`Alt`·`1~4`는 `＋` 칩으로 펼친다. 우상단 미니 바에서 `패드 숨김/보이기` · `⌨️ 가상 키보드` · `🔊 소리` · `✕ 나가기`(전체화면 해제 또는 오버레이 접기). **화면 회전 잠금(`screen.orientation.lock()`)이나 강제 90° 회전은 쓰지 않는다**
-- **휴대폰 키보드 입력 (⌨️)** — 모바일 플레이 바와 가로 미니 바의 `⌨️` 버튼이 1px 숨김 `<input>`에 포커스해 OS 키보드를 띄우고, `input`/`beforeinput` 이벤트로 들어온 문자를 `ci.sendKeyEvent`로 변환한다(Android IME `keyCode 229`처럼 `keydown`에 문자가 없는 경우까지 `input` 이벤트로 처리). `Enter`·`Backspace`도 각각 `257`·`259`로 보낸다
-- **키 안내** — 플레이 바 아래에 `W A S D 이동 · ← → 회전 · J/Z 사격 …` 압축 범례(데스크톱), 조작 안내 패널에 게임별 키 표
-- **소리 · 다시 시작** — `setVolume(0|1)`, `stop()` 후 재부팅
-- **딥링크 · 기억** — `?game=doom`으로 특정 번들 직행, 마지막 게임은 `localStorage`에 기억
-- **반응형** — 1440×900 데스크톱 2단 / 390×844 모바일 1단 / 844×390 가로 오버레이, 가로 넘침 0 (320·768·1024px 확인)
+- **One-click boot** — Digger is selected first and the start veil's `▶ Play` boots it. `Dos()` is called inside
+  the user's click, so browser autoplay policies never block the audio
+- **Bundle switching** — one click on a library card `stop()`s the running instance and boots the new bundle
+- **Run your own file** — drag and drop or pick a `.jsdos` / `.zip`. It opens with `URL.createObjectURL(file)`, and
+  dropping the file anywhere on the page routes it to the player. Files are never sent to a server
+- **Fullscreen** — the screen shell switches to the native Fullscreen API, and an `Exit fullscreen` button stays
+  available inside it (Esc can be intercepted by DOS)
+- **Input through the js-dos CommandInterface** — the `ci` (CommandInterface) is taken from
+  `Dos(stage, { onEvent })`'s `"ci-ready"` and every key goes in through `ci.sendKeyEvent(kbdCode, pressed)`. Keys
+  reach the emulator even when focus is outside the canvas, and without ever clicking the canvas
+- **Virtual gamepad** — direction · Enter · Space · Ctrl · Esc · Y · N plus a second row of `Shift` (run), `Alt`
+  (strafe) and `1`–`4` (weapons). `pointerdown` captures the press with `setPointerCapture` and only `pointerup`,
+  `pointercancel` or `lostpointercapture` release it (the old `pointerleave` release broke movement when a finger
+  drifted off a button). Multi-touch (move + fire) is supported, and `blur`, `visibilitychange` and `pagehide`
+  release everything so a key never sticks
+- **Per-game key profile** — this DOOM shareware bundle ships its own `DEFAULT.CFG`, so the up/down arrows do
+  nothing in gameplay (`key_up=W`, `key_down=S`, `key_strafeleft/right=A/D`, `key_left/right` = the left/right
+  arrows, `key_fire=Ctrl`, `key_use=Space`, `key_speed=Shift`). So in DOOM the d-pad ▲▼ sends `W`+`↑` and ◀▶ sends
+  `←`/`→` — walk with W/S in gameplay and navigate menus with the arrows. Digger and the rest keep the plain arrows
+- **PC keyboard binding (WASD mode, on by default, remembered in `localStorage`)** — `W`/`A`/`S`/`D` → movement,
+  `J`·`Z` → `Ctrl` (fire), `K`·`X` → `Space`, `L`·`C` → `Enter`. Arrows, `Ctrl`, `Space`, `Enter`, `Esc`, `1`–`7`
+  and `Y`/`N` always work regardless of the mode. So a key is never sent twice, js-dos's `window` key listener is
+  stopped with `stopPropagation` for these keys and only `ci.sendKeyEvent` is called. Page scrolling on arrows and
+  Space is blocked too
+- **The virtual pad is touch-only** — screens whose primary pointer is a mouse
+  (`@media (hover: hover) and (pointer: fine)`, `maxTouchPoints=0`) hide `.pad`. For hybrid devices such as touch
+  laptops the `⋮` menu has a **force-show virtual gamepad** toggle (remembered in `localStorage`)
+- **PC key settings dialog (desktop)** — the `Key settings` button in the play bar opens a dialog with the app's
+  own theme. Tap one of the 20 key cells across 10 actions (forward / back / left / right / fire / use / confirm /
+  run / strafe / menu) and press the key you want; it maps to the exact `KBD_*` code that `ci.sendKeyEvent` sends.
+  Picking a key another action uses **swaps the two** and shows a notice. The map is stored in `localStorage`
+  (`pkpilot0006:keymap`) and the legend under the play bar updates at once, with `Reset defaults` and `Close`;
+  keys never leak into the game while the dialog is open (Esc cancels an entry, a second Esc closes)
+- **Mobile landscape fullscreen overlay** — turning the phone sideways (or going fullscreen while landscape) hides
+  the header, hero, side panel and play bar, and the canvas fills `100vw × 100dvh`. A translucent D-pad (bottom
+  left) and action buttons (bottom right) float over the game (opacity .45, .85 while pressed), and `Shift`, `Alt`
+  and `1`–`4` expand from a `＋` chip. The mini bar at the top right holds `Hide pad / Show pad`, `⌨️ Virtual
+  keyboard`, `🔊 Sound` and `✕ Exit` (leave fullscreen or fold the overlay). It **never uses
+  `screen.orientation.lock()` or a forced 90° rotation**
+- **Phone keyboard input (⌨️)** — the `⌨️` button on the mobile play bar and the landscape mini bar focuses a
+  1px hidden `<input>` to raise the OS keyboard and converts characters from `input`/`beforeinput` events into
+  `ci.sendKeyEvent` calls (covering the Android IME case where `keydown` carries `keyCode 229` with no character).
+  `Enter` and `Backspace` are sent as `257` and `259`
+- **Key guide** — a compact legend under the play bar (`W A S D move · ← → turn · J/Z fire …`) on desktop, and a
+  per-game key table in the control guide panel
+- **Sound and restart** — `setVolume(0|1)`, and `stop()` followed by a fresh boot
+- **Deep links and memory** — `?game=doom` jumps straight to a bundle, and the last game is remembered in
+  `localStorage`
+- **Responsive** — two columns at 1440×900, one column at 390×844, landscape overlay at 844×390, zero horizontal
+  overflow (checked at 320, 768 and 1024px)
 
-## js-dos 크롬 정리
+## Cleaning up js-dos chrome
 
-js-dos는 자체 사이드바(저장·키보드·확대·성능·설정)를 주입한다. 이 앱은 같은 기능을 자체 툴바로 제공하므로 주입된 `.sidebar-thin`·스페이서(`.w-4`)·배경 이미지를 CSS로 숨기고 캔버스만 중앙 정렬한다. 마우스 캡처(`mouseCapture`)는 껐다 — 켜면 "Click to capture mouse" 안내가 화면을 덮는다. 시작 시 js-dos가 도는 Dhrystone 성능 측정 오버레이(`.dhry2-window`)도 숨기고 자체 부팅 베일을 쓴다.
+js-dos injects its own sidebar (save, keyboard, zoom, performance, settings). This app provides the same features
+in its own toolbar, so the injected `.sidebar-thin`, spacer (`.w-4`) and background image are hidden with CSS and
+the canvas is centred. Mouse capture is off — enabling it covers the screen with a “Click to capture mouse” notice.
+The Dhrystone performance overlay js-dos runs at start (`.dhry2-window`) is hidden too, and the app uses its own
+boot veil.
 
-## 파일
+## Files
 
-| 파일 | 설명 |
+| File | Purpose |
 |------|------|
-| `index.html` | 마크업 + OG/PWA 메타 |
-| `style.css` | HD2Lab 다크 테마, 플레이어·라이브러리·패드·키 설정 모달·가로 오버레이 레이아웃 |
-| `app.js` | js-dos 로더, 부팅 상태 머신, 파일 실행, 전체화면, CommandInterface 입력(패드·키보드·게임별 프로필·키 재매핑·소프트 키보드·가로 오버레이) |
-| `manifest.json` | PWA 매니페스트 |
-| `og-image.png` | 1200×630 소셜 카드 |
-| `favicon.*`, `icon-*.png`, `apple-touch-icon.png` | 파비콘 세트 (듀얼 스큐 마크) |
-| `tools/make_assets.py` | 파비콘·OG 카드 생성 스크립트 |
+| `index.html` | markup + OG/PWA meta + theme pre-paint |
+| `style.css` | Soft Iris / Navy & Lavender shell, player · library · pad · key settings dialog · landscape overlay layout; the DOS stage itself stays `#000` |
+| `app.js` | js-dos loader, boot state machine, file running, fullscreen, CommandInterface input (pad, keyboard, per-game profile, key remapping, soft keyboard, landscape overlay) |
+| `assets/hd2-theme.*` | shared theme tokens and the 44px floating light/dark toggle |
+| `manifest.json` | PWA manifest |
+| `og-image.png` | 1200×630 social card |
+| `favicon.*`, `icon-*.png`, `apple-touch-icon.png` | favicon set (dual-skew mark) |
+| `tools/make_assets.py` | favicon and OG card generator |
 
-## 검증 (2026-11-16, 헤드리스 Chromium)
+## Verification (2026-11-16, headless Chromium)
 
-**키 설정 · 가로 오버레이 · 소프트 키보드 (45개 항목 전부 통과)**
+**Key settings · landscape overlay · soft keyboard (all 45 items passed)**
 
-| 항목 | 결과 |
+| Item | Result |
 |---|---|
-| 1440×900 데스크톱 | `.pad` `display:none`(높이 0), `⋮` 강제 표시 토글 켜고 끄기 동작, `키 설정` 보임·`⌨️ 키보드` 숨김 |
-| 키 설정 모달 | 10행·20칸, 기본값이 사양과 일치, `사격` J→F 재매핑 후 범례 `F / Z / Ctrl`, `localStorage` 저장·새로고침 후에도 F 유지 |
-| 중복 키 | `사용` 칸에 F를 넣으면 `사격` 1번 칸과 서로 바뀌고 안내 문구 표시 |
-| Esc | 입력 중 Esc는 입력 취소(모달 유지), 한 번 더 Esc는 모달 닫기 + `키 설정` 버튼으로 포커스 복귀 |
-| DOOM 실플레이 | 키보드 `Enter`→`257`, 재매핑한 `F`→`341` down/up 1회, 탄약 HUD 감소(픽셀 차이 199), `W`→`87` 이동 |
-| WASD 토글 | 켜면 `J`→`341`, 끄면 `J`→`74`(글자), `Enter`는 모드무관 `257` |
-| 기본값 초기화 | 10개 동작 전부 사양 기본값 복원 |
-| 390×844 세로 | 패드 보임, `키 설정` 숨김, `⌨️ 키보드` 보임, 패드 Enter→`257`, 소프트 키보드 `w k1`→`87·75·49·32`, `Enter`→`257`, `Backspace`→`259` |
-| 844×390 가로 | 오버레이 `on`, 헤더·히어로·사이드·플레이 바·푸터 전부 숨김, 셸 844×390, D-pad 좌하·액션 우하, 키 불투명도 0.45→눌림 0.85, `＋` 칩으로 Shift/Alt/1~4 펼침 |
-| 가로 미니 바 | 4버튼(패드 숨김/보이기·⌨️·🔊·✕), 패드 숨기기/보이기·음소거 동작, ✕로 오버레이 접기, 다시 돌리면 재개 |
-| 가로 소프트 키보드 | `w s 2`→`87·83·50` 전달 |
-| 콘솔/네트워크 | 세 환경 모두 오류 0 · 실패 요청 0 |
-| 가로 넘침 | 320·360·390·768·844·1024·1180·1440px 전부 0 |
-| 버튼 표면 | js-dos가 늦게 주입하는 preflight(`button[type=button]{background-color:transparent}`)에 버튼 배경이 지워지지 않도록 선택자를 보강 |
+| 1440×900 desktop | `.pad` `display:none` (height 0), the `⋮` force-show toggle turns on and off, `Key settings` visible and `⌨️ Keyboard` hidden |
+| Key settings dialog | 10 rows × 20 cells, defaults match the spec, remapping `fire` J→F updates the legend to `F / Z / Ctrl` and survives a reload and `localStorage` |
+| Duplicate key | Entering F for `use` swaps it with `fire` cell 1 and shows the notice |
+| Esc | Esc while entering cancels the entry (dialog stays); a second Esc closes the dialog and returns focus to `Key settings` |
+| DOOM in play | keyboard `Enter`→`257`, remapped `F`→`341` down/up once, ammo HUD drops (199 pixel difference), `W`→`87` moves |
+| WASD toggle | on, `J`→`341`; off, `J`→`74` (the letter); `Enter`→`257` either way |
+| Reset defaults | all 10 actions back to the spec defaults |
+| 390×844 portrait | pad shown, `Key settings` hidden, `⌨️ Keyboard` shown, pad Enter→`257`, soft keyboard `w k1`→`87·75·49·32`, `Enter`→`257`, `Backspace`→`259` |
+| 844×390 landscape | overlay on, header/hero/side/play bar/footer all hidden, shell 844×390, D-pad bottom left and actions bottom right, key opacity 0.45→0.85 pressed, `＋` chip expands Shift/Alt/1–4 |
+| Landscape mini bar | four buttons (hide/show pad · ⌨️ · 🔊 · ✕), hide/show and mute work, ✕ folds the overlay, rotating back resumes |
+| Landscape soft keyboard | `w s 2`→`87·83·50` |
+| Console/network | zero errors and zero failed requests in all three environments |
+| Horizontal overflow | zero at 320, 360, 390, 768, 844, 1024, 1180 and 1440px |
+| Button surfaces | selectors strengthened so js-dos's late-injected preflight (`button[type=button]{background-color:transparent}`) cannot clear button backgrounds |
 
-**이전 회차**
+**Earlier rounds**
 
-- 로컬 서버 + 1440×900: Digger 부팅 2.7초, 콘솔 오류 0, 페이지 오류 0, 실패 요청 0, 4xx 0, 가로 넘침 0
-- `?game=doom` 2.6초 · `?game=dhrystone` 1.6초 부팅, 각각 캔버스 640×400 생성
-- 파일 입력으로 `digger.jsdos` 로컬 실행 성공(`01 / RUNNING`)
-- 가상 패드: DOOM 메뉴에서 ArrowDown 입력 시 화면 63px 평균 변화 = 입력이 에뮬레이터에 도달
-- 음소거 `aria-pressed=true`, 전체화면 진입/나가기, 다시 시작 후 캔버스 재생성 확인
-- 390×844: 가로 넘침 0, 캔버스가 셸에 맞게 325×203로 스케일
-- 미검증: 실기기(iOS Safari·Android 카톡 인앱) 터치·오디오·소프트 키보드, 대용량(수십 MB) 번들 로딩 시간
+- Local server at 1440×900: Digger booted in 2.7 s, zero console errors, zero page errors, zero failed requests,
+  zero 4xx, zero horizontal overflow
+- `?game=doom` booted in 2.6 s and `?game=dhrystone` in 1.6 s, each creating a 640×400 canvas
+- Running the local `digger.jsdos` through the file input succeeded (`01 / RUNNING`)
+- Virtual pad: ArrowDown in the DOOM menu changed the screen by 63px on average = input reached the emulator
+- Mute `aria-pressed=true`, fullscreen enter/exit, and canvas recreated after restart confirmed
+- 390×844: zero horizontal overflow, canvas scaled to 325×203 inside the shell
+- Not verified: real-device (iOS Safari, Android KakaoTalk in-app) touch, audio and soft keyboard; load time for
+  large (tens of MB) bundles
 
-## 라이선스
+## Licence
 
-번들은 js-dos 프로젝트가 공개 배포하는 파일을 그대로 링크한다(직접 재배포하지 않는다). 원작 권리는 각 저작권자에게 있다.
+The bundles link to files the js-dos project distributes publicly (they are not redistributed here). Copyright in
+each original work belongs to its owner.
