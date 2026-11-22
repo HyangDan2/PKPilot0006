@@ -89,6 +89,32 @@ test.describe('landscape shell', () => {
     expect(padKeysVisible).toBe(false);
   });
 
+  test('a toast sits under the mini bar, never on top of it', async ({ page }) => {
+    await installEngine(page);
+    await page.goto('/');
+    await waitReady(page);
+    await startFromMiniBar(page, 'digger');
+
+    await page.evaluate(() => window.__pkpilot.view.toast('겹침 확인용 메시지'));
+    await expect(page.locator('#toast')).toHaveClass(/is-on/);
+
+    const geometry = await page.evaluate(() => {
+      const toast = document.getElementById('toast').getBoundingClientRect();
+      const bar = document.getElementById('miniBar').getBoundingClientRect();
+      const inside = (inner, outer) => inner.top >= outer.top - 1 && inner.bottom <= outer.bottom + 1
+        && inner.left >= outer.left - 1 && inner.right <= outer.right + 1;
+      return {
+        overlap: Math.min(toast.right, bar.right) - Math.max(toast.left, bar.left) > 1
+          && Math.min(toast.bottom, bar.bottom) - Math.max(toast.top, bar.top) > 1,
+        toastCovers: inside(bar, toast),
+        inViewport: toast.bottom <= window.innerHeight + 1,
+      };
+    });
+    expect(geometry.overlap).toBe(false);
+    expect(geometry.toastCovers).toBe(false);
+    expect(geometry.inViewport).toBe(true);
+  });
+
   test('dark mode paints the floating pad in Navy & Lavender, not light glass', async ({ page }) => {
     await installEngine(page);
     await page.goto('/');
