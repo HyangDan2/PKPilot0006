@@ -839,7 +839,10 @@ html[data-landscape="on"] .screen {
 }
 html[data-landscape="on"] .screen-overlay { background: rgba(4, 5, 10, 0.9); }
 html[data-landscape="on"] .overlay-card { padding: 16px 18px; max-width: 420px; }
-html[data-landscape="on"] .toast { top: max(10px, env(safe-area-inset-top)); bottom: auto; }
+html[data-landscape="on"] .toast {
+  /* under the mini bar instead of on top of it */
+  top: calc(max(10px, env(safe-area-inset-top)) + 54px); bottom: auto;
+}
 html[data-landscape="on"] .capture-flag { bottom: auto; top: 8px; }
 
 html[data-landscape="on"] .pad {
