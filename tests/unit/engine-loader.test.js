@@ -148,3 +148,37 @@ describe('EngineLoader', () => {
     expect(clock.pending).toBe(0);
   });
 });
+
+describe('EngineLoader cancel', () => {
+  it('rejects the pending load and removes the script node', async () => {
+    const doc = makeDocument();
+    const loader = new EngineLoader({ doc, global: {}, timeoutMs: 5000, pollMs: 20 });
+    const pending = loader.load();
+    expect(loader.state).toBe('loading');
+    expect(doc.scripts()).toHaveLength(1);
+
+    expect(loader.cancel('cancelled')).toBe(true);
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    expect(loader.state).toBe('failed');
+    expect(doc.scripts()).toHaveLength(0);
+
+    // a cancel of an idle loader is a no-op, not an error
+    expect(loader.cancel()).toBe(false);
+  });
+
+  it('a retry after a cancel starts a fresh attempt', async () => {
+    const doc = makeDocument();
+    const global = {};
+    const loader = new EngineLoader({ doc, global, timeoutMs: 5000, pollMs: 20 });
+    const pending = loader.load().catch(() => null);
+    loader.cancel();
+    await pending;
+    loader.reset();
+    expect(loader.state).toBe('idle');
+
+    const retry = loader.load();
+    global.Dos = () => ({});
+    doc.scripts()[0].fire('load');
+    await expect(retry).resolves.toMatchObject({ state: 'ready' });
+  });
+});

@@ -62,6 +62,11 @@ export class DosRuntime {
     this.timers_ = new Set();
     this.waiters = new Set();
     this.volume = 1;
+    /** nodes this runtime saw inside the mount — the only ones it may remove */
+    this.mountNodes = [];
+    /** one teardown per runtime, shared by every caller */
+    this.stopPromise = null;
+    this.stopSettled = false;
   }
 
   get running() {
@@ -90,6 +95,21 @@ export class DosRuntime {
   #clearTimers() {
     for (const handle of this.timers_) this.timers.clearTimeout(handle);
     this.timers_.clear();
+  }
+
+  /** Remember every node this generation put inside the stage.
+   *  Teardown removes exactly these, never whatever a later generation mounted. */
+  #captureMount() {
+    if (!this.mount) return;
+    if (this.mount.children) {
+      for (const node of Array.from(this.mount.children)) {
+        if (node && !this.mountNodes.includes(node)) this.mountNodes.push(node);
+      }
+    }
+    // the picture itself, captured by identity: a canvas a later generation
+    // draws is a different node and can never be removed by this snapshot
+    const canvas = typeof this.mount.querySelector === 'function' ? this.mount.querySelector('canvas') : null;
+    if (canvas && !this.mountNodes.includes(canvas)) this.mountNodes.push(canvas);
   }
 
   /* Late js-dos events from a stopped or superseded runtime land here and are
@@ -143,6 +163,7 @@ export class DosRuntime {
       this.#fail(new RuntimeError('js-dos가 실행 인스턴스를 돌려주지 않았습니다.', 'no-instance'));
       throw this.error;
     }
+    this.#captureMount();
 
     try {
       await this.#waitFor(() => !!this.ci, this.bootTimeoutMs, () => new RuntimeError(
@@ -159,6 +180,7 @@ export class DosRuntime {
 
     this.readyAt = this.now();
     this.state = 'running';
+    this.#captureMount();
     this.#log('running', { bootMs: this.readyAt - this.startedAt });
     try { this.props.setVolume(this.volume); } catch (_) { /* volume is cosmetic */ }
     return this;
@@ -243,7 +265,20 @@ export class DosRuntime {
    * resolves — a running emulator must never pull a revoked URL.
    */
   async stop(reason = 'stop') {
+    if (this.stopPromise) {
+      // a stop while the teardown is still running shares it (never a second
+      // props.stop()); one that arrives after it finished is a no-op
+      const result = await this.stopPromise.catch(() => null);
+      return this.stopSettled ? { already: true, reason } : (result || { already: true, reason });
+    }
     if (this.state === 'stopped') return { already: true, reason };
+    this.stopPromise = this.#teardown(reason);
+    const settle = () => { this.stopSettled = true; };
+    this.stopPromise.then(settle, settle);
+    return this.stopPromise;
+  }
+
+  async #teardown(reason = 'stop') {
     const previous = this.state;
     const wasRunning = previous === 'running';
     this.state = 'stopped';
@@ -270,9 +305,16 @@ export class DosRuntime {
       }
     }
 
-    if (this.mount && typeof this.mount.replaceChildren === 'function') {
-      try { this.mount.replaceChildren(); } catch (error) { errors.push(error); }
+    if (this.mount && typeof this.mount.removeChild === 'function') {
+      // only the nodes this generation mounted: a newer generation's canvas is
+      // never touched, even if its teardown overlapped with ours
+      for (const node of this.mountNodes) {
+        try {
+          if (node && node.parentNode === this.mount) this.mount.removeChild(node);
+        } catch (error) { errors.push(error); }
+      }
     }
+    this.mountNodes = [];
     this.stoppedAt = this.now();
     // a boot that failed stays "failed" (terminal) rather than looking like a
     // clean stop: the UI and the session manager read that state

@@ -32,8 +32,8 @@ src/
     settings-dialog.js     Key settings dialog (listen, swap, release, reset)
     responsive-mode.js     Touch detection, immersive landscape, pad show/hide
   data/games.js            Bundle metadata + captured thumbnails
-tests/unit                 Vitest (60 tests, no DOM needed — everything is injected)
-tests/e2e                  Playwright with a stubbed js-dos module
+tests/unit                 Vitest (~84 tests, no DOM needed — everything is injected)
+tests/e2e                  Playwright with a stubbed js-dos module (desktop + iPhone 13 profile)
 tools/                     static check, local server, thumbnail and screenshot capture
 ```
 
@@ -49,7 +49,12 @@ tools/                     static check, local server, thumbnail and screenshot 
 * Every boot gets a **generation id**. Late events, late `ci-ready` signals and late canvas appearances from a
   superseded generation are dropped, and the stale runtime is stopped.
 * Picking another game (or a file) while booting **replaces** the request: the old runtime is stopped in order —
-  keys released → js-dos instance stopped → timers cleared → mount emptied → Blob URL revoked.
+  keys released → js-dos instance stopped → timers cleared → mount nodes removed → Blob URL revoked.
+* Teardown is **serialized**: `stop()` and every replacement share one promise chain, so a runtime that is still
+  shutting down never shares the stage with the next generation. Each teardown works on a snapshot (runtime, target,
+  generation), removes only the nodes it mounted, and releases only its own Blob URL.
+* Volume and mute are one state (slider · mini bar · emulator) applied again to every new instance, and remembered
+  in `localStorage`, so switching games or restarting keeps the level.
 * `loadEngine()` remembers a failure. A retry is an explicit `force` and injects a fresh script node (never a
   second one), and the second attempt uses the official CDN as a fallback source.
 * js-dos, its emulator wasm and its stylesheet are all pinned to **8.5.4**; the unversioned `/latest/` URL exists
@@ -57,10 +62,15 @@ tools/                     static check, local server, thumbnail and screenshot 
 
 ### Input engine (Phase 2)
 
-* Every input source has an id (`keyboard`, `pad:3`, `type:12`, `tap:4`) and a DOS key is held while at least one
-  source holds it — a finger lifting cannot cut a physical key, and two sources never send a double keydown.
+* Every input source has an id (`kbd:KeyJ`, `pad:3`, `type:12`, `tap:4`) and a DOS key is held while at least one
+  source holds it — a finger lifting cannot cut a physical key, two sources never send a double keydown, and J and Z
+  (both mapped to Ctrl) can be held together: lifting J leaves Ctrl down for Z.
 * Typed characters go through a **sequential queue** (down → hold → up → gap), so `aaa` really reaches DOS as three
-  keystrokes.
+  keystrokes. Every timer the manager owns is recorded and cancelled on release/blur/generation change, and the queue
+  belongs to one input generation — a character typed for game A never lands in game B.
+* Nothing is intercepted **before a game runs**: Tab, Space, Enter and typing work normally. While a game runs the
+  stage holds focus and takes every key, except that a focused control keeps the keys that operate it (Space/Enter on
+  a button or link, every key in a text field, a dialog or a menu). Arrows, letters and Ctrl still reach the game.
 * A **capture gate** closes while the settings dialog is open: no key reaches the game, everything held is
   released, and the screen shows `게임 키 입력 일시정지`.
 * `blur`, `visibilitychange`, `pagehide`, `pointercancel` and `lostpointercapture` all release held keys.
@@ -81,13 +91,17 @@ and exit reachable before and after booting.
 ```bash
 npm ci
 node tools/static-check.mjs   # files, imports, DOM ids, pinned engine, size budget
-npx vitest run                # 60 unit tests
-npx playwright test           # E2E, js-dos replaced by a recording stub
+npx vitest run                # unit tests
+npx playwright test           # E2E on desktop + an iPhone 13 profile, js-dos replaced by a recording stub
 ```
 
 The E2E suite runs without downloading the emulator: `tests/e2e/util.js` serves a stub `js-dos.js` that reports
-`ci-ready`, records every `sendKeyEvent`, and can fail on purpose (`fail: 'no-ci' | 'canvas' | 'never'`) to exercise
-the error paths. CI (`.github/workflows/ci.yml`) runs the same three commands.
+`ci-ready`, records every `sendKeyEvent`, and can fail on purpose (`fail: 'no-ci' | 'canvas' | 'never'`, plus
+`stopDelay` for a slow teardown) to exercise the error and race paths. `tests/e2e/qa-v2.spec.js` holds the eight
+second-review scenarios; `tests/e2e/landscape.spec.js` holds the phone-landscape and page-lifecycle runs.
+
+The CI definition is kept in `docs/ci-workflow.yml` (same commands as `npm test`) because the GitHub App that pushes
+for this repository has no `workflows` scope: an attempt to add `.github/workflows/ci.yml` is refused with HTTP 403.
 
 ## Verified in this build
 
@@ -96,8 +110,10 @@ the error paths. CI (`.github/workflows/ci.yml`) runs the same three commands.
 | Real emulator boot (headless Chromium, live bundles) | Digger 6.2 s · DOOM 3.4 s · Dhrystone 1.1 s to `running`, canvas 947×592 |
 | Thumbnails | captured from those boots (`thumbs/digger.png`, `doom.png`, `dhrystone.png`) |
 | Horizontal overflow | 0 at 320 / 360 / 390 / 414 / 768 / 1024 / 1280 / 1440 px |
-| Unit suite | 60/60 (input ref-counting, char queue, keymap swap/release/reset, loader failure/retry/timeout, runtime readiness, 30 switches, Blob URL order) |
-| Not verified | a real iPhone (Safari) or Android device; audio; very large (tens of MB) bundles |
+| Unit suite | input ref-counting per physical key, char queue + timers + generations, keymap swap/release/reset, loader failure/retry/timeout/cancel, runtime readiness + teardown snapshot, 30 switches, serialized teardown, Blob URL order |
+| Second review (unit + E2E) | 8 QA scenarios: J+Z · Enter/Space on cards · A→B→C under a slow teardown · local A→B→C URL order · cancel while typing · mute across game change/restart · cancel + network failure · CI definition |
+| Mobile pass | iPhone 13 metrics with touch input on Chromium (layout, pad, landscape, lifecycle) |
+| Not verified | a real iPhone (Safari/WebKit — the sandbox is missing its GTK/GStreamer libraries) or Android device; audio output; very large (tens of MB) bundles |
 
 ## Notes
 

@@ -23,6 +23,14 @@ export default defineConfig({
   },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
+    {
+      // a phone's metrics and touch input, on the engine this host can run:
+      // WebKit (real iOS Safari) needs system libraries this sandbox does not
+      // have, so the mobile pass is Chromium with the iPhone 13 profile
+      name: 'mobile',
+      testMatch: ['**/mobile.spec.js', '**/landscape.spec.js', '**/qa-v2.spec.js', '**/player.spec.js'],
+      use: { ...devices['iPhone 13'], browserName: 'chromium' },
+    },
   ],
   webServer: process.env.PK6_BASE
     ? undefined

@@ -8,6 +8,13 @@
    Policy for “another game while booting”: newest request wins. The older
    runtime is stopped in order (input released → instance stopped → resources
    released) before the new one is created.
+
+   Teardown is serialized. `stop()` and the teardown a new boot performs share
+   one promise chain, so a runtime that is still shutting down can never share
+   the stage with the instance the next generation mounts. Every teardown works
+   on a snapshot (runtime, target, generation) taken when it started, so a late
+   `onAfterStop` can only release the blob URL and the canvas of the generation
+   it was given — never of the one that replaced it.
    ========================================================================== */
 
 import { CONFIG } from '../config.js';
@@ -37,7 +44,16 @@ export class SessionManager {
     this.history = [];
     this.boots = 0;
     this.disposals = 0;
-    this.busy = null;
+
+    /** every teardown runs here, one after another (never in parallel) */
+    this.chain = Promise.resolve();
+    /** number of teardown tasks queued or running */
+    this.pendingTeardowns = 0;
+  }
+
+  /** true while a teardown task is queued or running */
+  get stopping() {
+    return this.pendingTeardowns > 0;
   }
 
   get running() {
@@ -65,9 +81,23 @@ export class SessionManager {
     if (this.history.length > this.historyLimit) this.history.shift();
   }
 
+  /** Queue one teardown behind every teardown that is already in flight. */
+  #enqueue(task) {
+    this.pendingTeardowns += 1;
+    const run = this.chain.then(task, task);
+    this.chain = run.then(() => {}, () => {});
+    const done = () => { this.pendingTeardowns = Math.max(0, this.pendingTeardowns - 1); };
+    run.then(done, done);
+    return run;
+  }
+
+  /** Wait for every queued teardown (used by boot before it mounts). */
+  #settled() {
+    return this.chain;
+  }
+
   /**
-   * Start `target`. Resolves with an outcome object; it never throws, so the UI
-   * can render success, error and “superseded” the same way.
+   * Start `target`.
    * @returns {Promise<{ok: boolean, generation: number, stale?: boolean, error?: Error}>}
    */
   async boot(target) {
@@ -82,8 +112,10 @@ export class SessionManager {
     this.#emit('request', { generation, target });
     this.#record({ generation, targetId: target.id, name: target.name, state: 'requested' });
 
-    // newest wins: the previous execution is fully torn down first
+    // newest wins: the previous execution is fully torn down first, and the
+    // stage stays untouched until that teardown has actually finished
     await this.#dispose('replaced');
+    await this.#settled();
     if (generation !== this.generation) {
       this.#record({ generation, targetId: target.id, name: target.name, state: 'superseded' });
       return { ok: false, generation, stale: true };
@@ -158,29 +190,56 @@ export class SessionManager {
     try { return await runtime.stop(reason); } catch (_) { return null; }
   }
 
-  /** Stop and release the current execution. Never throws. */
-  async #dispose(reason) {
+  /**
+   * Stop and release the current execution. The runtime, its target and its
+   * generation are frozen here: the teardown task only ever touches that
+   * snapshot, so nothing a later generation mounts can be released by mistake.
+   */
+  #dispose(reason) {
     const runtime = this.runtime;
-    if (!runtime) return null;
+    const snapshot = { runtime, target: this.target, generation: runtime ? runtime.generation : this.generation };
+    if (!runtime) {
+      // nothing mounted, but a teardown from an earlier generation may still be
+      // running: the caller has to wait for it before it may mount anything
+      return this.#settled();
+    }
     this.runtime = null;
     this.disposals += 1;
-    try { this.onBeforeStop({ reason, target: this.target, runtime }); } catch (_) { /* keep tearing down */ }
-    const result = await this.#safeStop(runtime, reason);
-    try { this.onAfterStop({ reason, target: this.target, runtime }); } catch (_) { /* keep going */ }
-    this.#emit('disposed', { reason, generation: runtime.generation });
-    return result;
+
+    try { this.onBeforeStop({ reason, target: snapshot.target, runtime: snapshot.runtime }); } catch (_) { /* keep tearing down */ }
+
+    return this.#enqueue(async () => {
+      const result = await this.#safeStop(snapshot.runtime, reason);
+      try { this.onAfterStop({ reason, target: snapshot.target, runtime: snapshot.runtime }); } catch (_) { /* keep going */ }
+      this.#emit('disposed', {
+        reason,
+        generation: snapshot.generation,
+        target: snapshot.target,
+        runtime: snapshot.runtime,
+      });
+      return result;
+    });
   }
 
   /** A user-facing stop (close / unmount). Invalidates pending boots. */
   async stop(reason = 'manual') {
-    this.generation += 1;
+    const generation = ++this.generation;
     const target = this.target;
-    await this.#dispose(reason);
+    const disposal = this.#dispose(reason);
+    // the UI must treat the game as stopped immediately; the instance itself is
+    // dismantled behind the serialized teardown
     this.state = 'idle';
+    await disposal;
+    await this.#settled();
+    if (this.generation !== generation) {
+      // a newer boot (or stop) took over while this one was tearing down
+      return { ok: true, generation, stale: true };
+    }
     this.target = null;
-    if (target) this.#record({ generation: this.generation, targetId: target.id, name: target.name, state: 'stopped', reason });
+    this.error = null;
+    if (target) this.#record({ generation, targetId: target.id, name: target.name, state: 'stopped', reason });
     this.#emit('idle', { reason });
-    return { ok: true };
+    return { ok: true, generation };
   }
 
   setVolume(value) {
@@ -196,6 +255,7 @@ export class SessionManager {
       currentId: this.currentId,
       boots: this.boots,
       disposals: this.disposals,
+      stopping: this.stopping,
       runtime: this.runtime
         ? { generation: this.runtime.generation, state: this.runtime.state, durationMs: this.runtime.durationMs }
         : null,

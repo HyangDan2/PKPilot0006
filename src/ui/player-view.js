@@ -55,6 +55,8 @@ export class PlayerView {
     this.target = null;
     this.toastTimer = 0;
     this.handlers = {};
+    /** the audio state the slider has to agree with */
+    this.audio = { volume: 1, muted: false };
   }
 
   bind(handlers = {}) {
@@ -117,6 +119,8 @@ export class PlayerView {
     if (!screen || !overlay) return;
 
     screen.dataset.state = this.phase;
+    screen.setAttribute('aria-busy', String(this.phase === 'booting'));
+    overlay.dataset.phase = this.phase;
     document.body.dataset.playerState = this.phase;
     const running = this.phase === 'running';
     overlay.hidden = running;
@@ -178,19 +182,47 @@ export class PlayerView {
     if (progressText) progressText.textContent = value > 0 ? `번들 받는 중 · ${value}%` : 'DOSBox를 올리는 중…';
   }
 
-  setMuted(muted) {
-    if (this.el.mute) {
-      this.el.mute.setAttribute('aria-pressed', String(muted));
-      this.el.mute.setAttribute('aria-label', muted ? '소리 켜기' : '소리 끄기');
-      this.el.mute.title = muted ? '소리 켜기' : '소리 끄기';
+  setAudio({ volume, muted } = {}) {
+    const level = Math.max(0, Math.min(1, Number(volume)));
+    const silent = !!muted;
+    this.audio = { volume: Number.isFinite(level) ? level : 1, muted: silent };
+    const percent = silent ? 0 : Math.round(this.audio.volume * 100);
+    if (this.el.volume) {
+      this.el.volume.value = String(percent);
+      // the slider shows what the emulator actually plays: 0 while muted
+      this.el.volume.setAttribute('aria-valuetext', silent ? '무음' : `${percent}%`);
     }
-    if (this.el.muteLabel) this.el.muteLabel.textContent = muted ? '무음' : '소리';
-    if (this.el.muteIcon) this.el.muteIcon.setAttribute('href', muted ? '#i-mute' : '#i-volume');
-    if (this.el.volume) this.el.volume.value = muted ? '0' : '100';
+    if (this.el.mute) {
+      this.el.mute.setAttribute('aria-pressed', String(silent));
+      this.el.mute.setAttribute('aria-label', silent ? '소리 켜기' : '소리 끄기');
+      this.el.mute.title = silent ? '소리 켜기' : '소리 끄기';
+    }
+    if (this.el.muteLabel) this.el.muteLabel.textContent = silent ? '무음' : '소리';
+    if (this.el.muteIcon) this.el.muteIcon.setAttribute('href', silent ? '#i-mute' : '#i-volume');
+    const mini = this.doc.getElementById('miniMuteBtn');
+    if (mini) {
+      mini.setAttribute('aria-pressed', String(silent));
+      mini.textContent = silent ? '🔇' : '🔊';
+      mini.setAttribute('aria-label', silent ? '소리 켜기' : '소리 끄기');
+    }
   }
 
+  /** Keep the volume slider and the audio state in step in one place. */
   setVolume(value) {
-    if (this.el.volume) this.el.volume.value = String(value);
+    this.setAudio({ volume: Number(value) / 100, muted: this.audio.muted });
+  }
+
+  /** The stage is the application focus target while a game runs. */
+  focusStage({ force = false } = {}) {
+    const stage = this.el.stage;
+    if (!stage || typeof stage.focus !== 'function') return false;
+    const active = this.doc.activeElement;
+    const keep = !force && active && active.closest
+      ? active.closest('.control-bar, .mini-bar, .site-header, .library, .keydialog, .disclosure, input, textarea, select, [role="dialog"]')
+      : null;
+    if (keep) return false; // never steal focus from a control the player is using
+    try { stage.focus({ preventScroll: true }); } catch (_) { try { stage.focus(); } catch (__) { return false; } }
+    return this.doc.activeElement === stage || !this.doc.activeElement;
   }
 
   setFullscreen(on) {

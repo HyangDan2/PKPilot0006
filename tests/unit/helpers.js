@@ -130,6 +130,7 @@ export function makeDocument() {
 export function makeRuntime({ id = 0, result = 'running', delays = false, log = [] } = {}) {
   const runtime = {
     id,
+    generation: id,
     state: 'idle',
     ci: { sendKeyEvent: () => {} },
     startedAt: 0,

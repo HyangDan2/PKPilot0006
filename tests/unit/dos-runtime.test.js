@@ -9,12 +9,26 @@ function makeMount({ canvas = true } = {}) {
       if (selector !== 'canvas') return null;
       return mount.canvas || null;
     },
+    appendChild(node) {
+      node.parentNode = mount;
+      mount.children.push(node);
+      return node;
+    },
+    removeChild(node) {
+      mount.children = mount.children.filter((child) => child !== node);
+      node.parentNode = null;
+      if (mount.canvas === node) mount.canvas = null;
+      return node;
+    },
     replaceChildren() {
       mount.children = [];
       mount.canvas = null;
     },
   };
-  if (canvas) mount.canvas = { width: 640, height: 400 };
+  if (canvas) {
+    mount.canvas = { width: 640, height: 400, parentNode: mount };
+    mount.children.push(mount.canvas);
+  }
   return mount;
 }
 
@@ -157,5 +171,44 @@ describe('DosRuntime teardown', () => {
     const runtime = makeRuntime({ Dos, mount: makeMount(), clock });
     await runtime.start({ url: 'x.jsdos' });
     await expect(runtime.start({ url: 'y.jsdos' })).rejects.toMatchObject({ code: 'state' });
+  });
+});
+
+describe('DosRuntime teardown snapshot', () => {
+  it('removes only the nodes it mounted, never a later generation’s canvas', async () => {
+    const clock = makeClock();
+    const mount = makeMount();
+    const { Dos, calls } = makeDos();
+    const first = makeRuntime({ Dos, mount, clock });
+    await first.start({ url: 'a.jsdos' });
+    const oldCanvas = mount.canvas;
+
+    // the next generation mounts into the same stage before the stop resolves
+    const newCanvas = { width: 320, height: 200, parentNode: null };
+    mount.appendChild(newCanvas);
+    await first.stop('replaced');
+
+    expect(mount.children).toContain(newCanvas);
+    expect(mount.children).not.toContain(oldCanvas);
+    expect(calls.stops).toBe(1);
+  });
+
+  it('shares one teardown between concurrent stop calls', async () => {
+    const clock = makeClock();
+    const mount = makeMount();
+    let stops = 0;
+    const Dos = (target, options) => {
+      options.onEvent('ci-ready', { sendKeyEvent: () => {} });
+      return {
+        stop: async () => { stops += 1; await new Promise((resolve) => setTimeout(resolve, 5)); },
+        setVolume: () => {},
+      };
+    };
+    const runtime = makeRuntime({ Dos, mount, clock });
+    await runtime.start({ url: 'a.jsdos' });
+    const [one, two] = await Promise.all([runtime.stop('one'), runtime.stop('two')]);
+    expect(stops).toBe(1);
+    expect(one.already).toBe(false);
+    expect(two.already).toBe(true); // a second stop joins the first, never repeats it
   });
 });

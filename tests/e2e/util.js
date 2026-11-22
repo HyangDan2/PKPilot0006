@@ -3,12 +3,15 @@
    a WASM emulator. `window.__stub` records what the app sent to the emulator. */
 
 export const STUB_SOURCE = `
-window.__stub = { boots: [], keys: [], stops: 0, volumes: [], doubleStops: 0, bootsAt: [] };
+window.__stub = { boots: [], keys: [], stops: 0, volumes: [], doubleStops: 0, bootsAt: [], log: [], canvasesAtBoot: [] };
 window.Dos = function (target, options) {
   const cfg = window.__PK6_STUB__ || {};
   const state = window.__stub;
   state.boots.push(String(options.url));
   state.bootsAt.push(Date.now());
+  state.log.push({ t: 'boot', url: String(options.url) });
+  // how much of the previous generation is still on screen when this one mounts
+  state.canvasesAtBoot.push(target.querySelectorAll('canvas').length);
 
   const canvas = document.createElement('canvas');
   canvas.width = 640;
@@ -34,9 +37,12 @@ window.Dos = function (target, options) {
       if (stopped) { state.doubleStops += 1; return; }
       stopped = true;
       state.stops += 1;
+      state.log.push({ t: 'stop-start', url: String(options.url) });
+      if (cfg.stopDelay) await new Promise((resolve) => setTimeout(resolve, cfg.stopDelay));
       canvas.remove();
+      state.log.push({ t: 'stop-end', url: String(options.url) });
     },
-    setVolume: (value) => { state.volumes.push(value); },
+    setVolume: (value) => { state.volumes.push(value); state.lastVolume = value; },
     exit: async () => {},
   };
 
@@ -113,4 +119,9 @@ export async function bootGame(page, id) {
 
 export function stub(page) {
   return page.evaluate(() => window.__stub);
+}
+
+/** A local .jsdos file that the stub can "run" (nothing is really unzipped). */
+export function bundle(name, size = 4096) {
+  return { name, mimeType: 'application/zip', buffer: Buffer.alloc(size, 7) };
 }

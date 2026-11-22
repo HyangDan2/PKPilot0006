@@ -150,6 +150,10 @@ test.describe('layout', () => {
     await page.goto('/');
     await waitReady(page);
 
+    // colour transitions would otherwise be sampled mid-fade and report a
+    // contrast the resting state never has
+    await page.addStyleTag({ content: '*{transition:none!important;animation:none!important}' });
+
     const measure = async () => measureContrast(page);
     for (const theme of ['light', 'dark']) {
       await page.evaluate((value) => window.HD2Theme.set(value, { persist: false }), theme);

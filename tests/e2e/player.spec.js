@@ -251,6 +251,8 @@ test.describe('local bundle', () => {
     await installEngine(page);
     await page.goto('/');
     await waitReady(page);
+    // load the stubbed engine first, so the boot counter exists to assert on
+    await page.evaluate(() => window.__pkpilot.engine.load());
     await page.setInputFiles('#fileInput', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') });
     await expect(page.locator('#fileNote')).toContainText('.jsdos 또는 .zip');
     expect((await stub(page)).boots).toHaveLength(0);
