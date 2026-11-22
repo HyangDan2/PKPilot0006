@@ -218,7 +218,7 @@ export class PlayerView {
     if (!stage || typeof stage.focus !== 'function') return false;
     const active = this.doc.activeElement;
     const keep = !force && active && active.closest
-      ? active.closest('.control-bar, .mini-bar, .site-header, .library, .keydialog, .disclosure, input, textarea, select, [role="dialog"]')
+      ? active.closest('.control-bar, .mini-bar, .keydialog, dialog, input, textarea, select')
       : null;
     if (keep) return false; // never steal focus from a control the player is using
     try { stage.focus({ preventScroll: true }); } catch (_) { try { stage.focus(); } catch (__) { return false; } }

@@ -155,6 +155,16 @@ describe('KeyboardInput capture policy', () => {
     expect(manager.stats.blockedPresses).toBe(0); // nothing even reached the manager
   });
 
+  it('keeps a control’s key away from the emulator listener but not from the page', () => {
+    const { keyboard } = makeKeyboard();
+    const button = node(['button']);
+    let stopped = false;
+    const event = key('keydown', 'Space', button, { stopPropagation: () => { stopped = true; } });
+    expect(keyboard.onDown(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(false); // the button still activates
+    expect(stopped).toBe(true);                 // js-dos never sees it
+  });
+
   it('ignores auto-repeat for a held key', () => {
     const { keyboard, sent } = makeKeyboard();
     const body = node();

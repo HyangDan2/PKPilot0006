@@ -114,6 +114,8 @@ test.describe('QA 2 · Enter and Space operate the cards and the buttons', () =>
     expect(idle).toEqual({ space: false, arrow: false });
 
     await bootGame(page, 'digger');
+    // the picture owns the keyboard once a game runs
+    expect((await snapshot(page)).focus).toBe('dosStage');
     const running = await page.evaluate(() => {
       const event = new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', bubbles: true, cancelable: true });
       document.body.dispatchEvent(event);
