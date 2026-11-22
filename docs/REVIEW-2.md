@@ -2,7 +2,8 @@
 
 Every item below names the defect, the code that now owns the behaviour, and the
 test that fails without the fix. Runs: `node tools/static-check.mjs`,
-`npx vitest run` (89), `npx playwright test` (desktop + iPhone 13 profile).
+`npx vitest run` (90), `npx playwright test` (102: desktop 60 + iPhone 13
+profile 42).
 
 ## P0 — immediate
 
@@ -44,3 +45,27 @@ test that fails without the fix. Runs: `node tools/static-check.mjs`,
 6. QA 6 — mute survives a game change and a restart; a 40 % level is carried into the next instance.
 7. QA 7 — cancel a hanging download → idle; the next attempt fails cleanly with **다시 시도**; a newer pick is never overwritten by the old request.
 8. QA 8 — CI definition verified in `ci-workflow.test.js`; live activation blocked by the App permission (403), reported instead of worked around.
+
+## Follow-ups found by checking the deployed site
+
+The first deploy was verified against the live player (real js-dos, real
+bundles) and two behaviours only showed up there:
+
+| Symptom | Cause | Fix | Test |
+|---|---|---|---|
+| Space on a focused control (소리 끄기) did nothing while a game ran | js-dos listens on `document` and calls `preventDefault` on Space `keydown`, which cancels a button's activation | `keyboard.js`: a key owned by a focused field or control is `stopPropagation`-ed only — the page default runs, js-dos never sees it | unit “keeps a control’s key away from the emulator listener but not from the page”; E2E QA 2 |
+| Right after starting from a card, Space/Enter re-activated the card | focus stayed on the card button | `player-view.focusStage()` moves focus to `#dosStage` when a game starts (never away from the player controls, a dialog or a field) | E2E QA 2 (`focus === 'dosStage'`) |
+| The completion toast covered the landscape mini bar for 2.6 s | toast pinned to the top edge in landscape | toast sits under the bar (`top: safe-area + 54px`) | E2E landscape “a toast sits under the mini bar” |
+
+### Live check after the final deploy
+
+Real js-dos 8.5.4, Digger boot **2.6–2.7 s** to `running` with the canvas
+painted, console/page errors **0**. Holding J and Z gave `kbd:KeyJ` + `kbd:KeyZ`
+on Ctrl and releasing J left `ControlLeft` held by `kbd:KeyZ`. Space on the
+focused mute button muted, Space again unmuted. iPhone 13 landscape in dark mode:
+pad keys `rgba(24,32,58,0.8)` with `#E6E9F7` text, mini bar visible, the 보조 키
+row reachable.
+
+Screenshots: `work/pkpilot0006/v2-fix-pc.png`,
+`work/pkpilot0006/v2-fix-mobile-landscape-dark.png`
+(+ `v2-fix-mobile-landscape-dark-extra.png` with the extra row open).
