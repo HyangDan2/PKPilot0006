@@ -48,7 +48,7 @@
   <script>try{var h=localStorage.getItem('hd2-theme');document.documentElement.setAttribute('data-theme',h==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}</script>
   <link rel="stylesheet" href="./assets/hd2-theme.css?v=20261117-navy" />
   <script src="./assets/hd2-theme.js?v=20261117-navy" defer></script>
-  <link rel="stylesheet" href="style.css?v=20261122-player" />
+  <link rel="stylesheet" href="style.css?v=20261123-fix2" />
 </head>
 <body>
   <a class="skip-link" href="#main">본문으로</a>
@@ -105,7 +105,7 @@
       </div>
 
       <div class="screen" id="screenShell" data-state="idle">
-        <div class="stage" id="dosStage" role="application" aria-label="DOS 실행 화면"></div>
+        <div class="stage" id="dosStage" role="application" tabindex="0" aria-label="DOS 실행 화면"></div>
 
         <div class="screen-overlay" id="screenOverlay">
           <div class="overlay-card">
@@ -324,6 +324,6 @@
 
   <noscript><p class="noscript">DOS Player는 자바스크립트가 필요합니다. 브라우저 설정에서 자바스크립트를 켜 주세요.</p></noscript>
 
-  <script type="module" src="src/main.js?v=20261122-player"></script>
+  <script type="module" src="src/main.js?v=20261123-fix2"></script>
 </body>
 </html>

@@ -153,3 +153,120 @@ describe('SessionManager boot', () => {
     expect(runtimes[0].volume).toBe(0);
   });
 });
+
+describe('SessionManager teardown serialization', () => {
+  function delayedSession() {
+    const order = [];
+    const created = [];
+    let openGate = null;
+    const session = new SessionManager({
+      createRuntime: ({ generation }) => {
+        const runtime = makeRuntime({ id: generation, log: order });
+        const plainStop = runtime.stop.bind(runtime);
+        runtime.stop = async (reason) => {
+          order.push(`stop-start:${generation}`);
+          if (openGate) await openGate;
+          const result = await plainStop(reason);
+          order.push(`stop-end:${generation}`);
+          return result;
+        };
+        created.push(runtime);
+        order.push(`create:${generation}`);
+        return runtime;
+      },
+      onEvent: () => {},
+    });
+    return { session, order, created, gate: (promise) => { openGate = promise; } };
+  }
+
+  it('mounts the next runtime only after the previous stop resolved', async () => {
+    const { session, order, gate } = delayedSession();
+    await session.boot(target('digger'));
+
+    let release;
+    gate(new Promise((resolve) => { release = resolve; }));
+    const b = session.boot(target('doom'));
+    await new Promise((resolve) => setImmediate(resolve));
+    const c = session.boot(target('dhrystone'));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // the third instance must not exist while generation 1 is still stopping
+    expect(order).toContain('stop-start:1');
+    expect(order).not.toContain('create:2');
+    expect(order).not.toContain('create:3');
+
+    release();
+    gate(null);
+    const [rb, rc] = await Promise.all([b, c]);
+    expect(rb.stale).toBe(true);
+    expect(rc.ok).toBe(true);
+    expect(order.indexOf('stop-end:1')).toBeLessThan(order.indexOf('create:3'));
+    expect(session.runtime.generation).toBe(3);
+  });
+
+  it('frees the target snapshot of the stopped generation, not the new one', async () => {
+    const seen = [];
+    const disposed = [];
+    const session = new SessionManager({
+      createRuntime: ({ generation }) => makeRuntime({ id: generation }),
+      onEvent: (event) => { if (event.type === 'disposed') disposed.push(event.target.id); },
+      onAfterStop: ({ target: stopped }) => seen.push(stopped.id),
+    });
+    await session.boot(target('digger'));
+    await session.boot(target('doom'));
+    expect(seen).toEqual(['digger']);
+    expect(disposed).toEqual(['digger']);
+    expect(session.currentId).toBe('doom');
+  });
+
+  it('a stop requested during a boot waits for the instance it cancels', async () => {
+    const order = [];
+    let release;
+    const session = new SessionManager({
+      createRuntime: ({ generation }) => {
+        const runtime = makeRuntime({ id: generation, log: order });
+        runtime.onStart = () => new Promise((resolve) => { release = resolve; });
+        return runtime;
+      },
+      onEvent: () => {},
+    });
+    const pending = session.boot(target('digger'));
+    await new Promise((resolve) => setImmediate(resolve));
+    const stopping = session.stop('cancel');
+    expect(session.state).toBe('idle');
+    expect(session.stopping).toBe(true);
+    if (release) release();
+    await stopping;
+    const outcome = await pending;
+    expect(outcome.stale).toBe(true);
+    expect(order.filter((entry) => entry.startsWith('stop:1')).length).toBe(1);
+    expect(session.stopping).toBe(false);
+    expect(session.runtime).toBe(null);
+  });
+
+  it('never runs two teardowns at the same time', async () => {
+    const order = [];
+    let active = 0;
+    let peak = 0;
+    const session = new SessionManager({
+      createRuntime: ({ generation }) => {
+        const runtime = makeRuntime({ id: generation });
+        runtime.stop = async (reason) => {
+          active += 1;
+          peak = Math.max(peak, active);
+          order.push(`stop-start:${generation}`);
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          active -= 1;
+          order.push(`stop-end:${generation}`);
+          runtime.state = 'stopped';
+          return { reason };
+        };
+        return runtime;
+      },
+      onEvent: () => {},
+    });
+    await session.boot(target('digger'));
+    await Promise.all([session.boot(target('doom')), session.boot(target('dhrystone')), session.stop('manual')]);
+    expect(peak).toBe(1);
+  });
+});

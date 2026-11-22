@@ -16,6 +16,7 @@ export class SettingsDialog {
     store,
     onOpen = () => {},
     onClose = () => {},
+    onAfterClose = () => {},
     onChanged = () => {},
   } = {}) {
     this.dialog = dialog;
@@ -24,6 +25,7 @@ export class SettingsDialog {
     this.store = store;
     this.onOpen = onOpen;
     this.onClose = onClose;
+    this.onAfterClose = onAfterClose;
     this.onChanged = onChanged;
     this.listening = null;
     this.returnFocus = null;
@@ -261,5 +263,6 @@ export class SettingsDialog {
       ? this.returnFocus
       : this.doc.getElementById('keymapBtn');
     if (back) back.focus();
+    this.onAfterClose();
   }
 }

@@ -275,6 +275,10 @@ code, kbd { font-family: var(--mono); }
 .screen[data-state="running"] { border-color: var(--accent-line); }
 .screen[data-state="error"] { border-color: rgba(209, 67, 67, 0.55); }
 .stage { position: absolute; inset: 0; background: #05060A; }
+.stage:focus { outline: none; }
+/* the stage is a focusable application region: keyboard players need to see
+   where the keys currently go */
+.stage:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* centre whatever the emulator draws inside the bezel */
 .stage .items-start.justify-start { align-items: center !important; justify-content: center !important; }
 .stage > div { width: 100%; height: 100%; }
@@ -676,6 +680,8 @@ html[data-touch="off"] .pad:not([data-force="on"]) { display: none; }
 }
 .game-card.is-running .card-run { opacity: 1; transform: none; }
 .game-card.is-running { border-color: var(--accent); }
+.game-card.is-booting .card-run { opacity: 1; transform: none; background: var(--accent-soft); color: var(--accent-2); border: 1px solid var(--accent-line); }
+.game-card.is-booting { border-color: var(--accent-line); }
 .game-card.is-busy { cursor: progress; }
 
 /* benchmark + local file row */
@@ -843,7 +849,11 @@ html[data-landscape="on"] .pad {
   border: 0; border-radius: 0; background: none;
   pointer-events: none;
 }
-html[data-landscape="on"] .pad-head { display: none; }
+html[data-landscape="on"] .pad-head { display: block; margin: 0; height: 0; overflow: visible; }
+/* the pad heading text steps away, but the 보조 키 opener must stay reachable:
+   hiding the whole head also hid Shift · Alt · 무기 on a phone */
+html[data-landscape="on"] .pad-head > svg,
+html[data-landscape="on"] .pad-head > span { display: none; }
 html[data-landscape="on"] .pad-body { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 html[data-landscape="on"] .pad-key {
   pointer-events: auto; opacity: 0.58;
@@ -851,29 +861,34 @@ html[data-landscape="on"] .pad-key {
   background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
-[data-theme="dark"] html[data-landscape="on"] .pad-key { background: rgba(24, 32, 58, 0.78); color: #E6E9F7; }
 html[data-landscape="on"] .pad-key.is-down,
 html[data-landscape="on"] .pad-key.is-hot { opacity: 0.95; background: var(--accent); color: #FFFFFF; }
-html[data-landscape="on"] .dpad { grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 42px); gap: 5px; }
-html[data-landscape="on"] .pad-keys { max-width: 216px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+html[data-landscape="on"] .dpad { grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(3, 46px); gap: 6px; }
+html[data-landscape="on"] .pad-keys {
+  max-width: 232px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
+  margin-bottom: 42px; /* clears the floating 보조 키 opener */
+}
 html[data-landscape="on"] .pad-body { align-items: flex-end; }
 html[data-landscape="on"] .pad-extra {
-  position: fixed; z-index: 26; right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom) + 4px);
-  width: min(54vw, 280px);
-  display: none; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px;
+  position: fixed; z-index: 26; right: 14px; left: auto;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  width: min(66vw, 320px);
+  display: none; grid-template-columns: repeat(6, minmax(44px, 1fr)); gap: 6px;
   margin: 0; padding: 8px;
   border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 12px;
   background: rgba(8, 9, 14, 0.84);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   pointer-events: auto;
 }
+html[data-landscape="on"] .pad-extra .pad-key { min-height: 44px; }
 html[data-landscape="on"] .pad[data-extra="open"] .pad-extra { display: grid; }
+/* the extra row takes the action keys' place instead of covering them */
+html[data-landscape="on"] .pad[data-extra="open"] .pad-keys { visibility: hidden; }
 html[data-landscape="on"] .pad-more {
-  position: fixed; z-index: 26; right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom) + 4px);
-  display: inline-flex; align-items: center;
-  height: 30px; padding: 0 10px;
+  position: fixed; z-index: 26; right: 14px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 36px; padding: 0 14px;
   border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 999px;
   background: rgba(255, 255, 255, 0.66); color: #2A2440;
   font-size: 10.5px; font-weight: 650;
@@ -881,6 +896,40 @@ html[data-landscape="on"] .pad-more {
 }
 html[data-landscape="on"] .pad[data-extra="open"] .pad-more { opacity: 0; pointer-events: none; }
 html[data-landscape="on"] .pad[data-hidden="on"] { display: none; }
+
+/* landscape controls are thumb targets: 44 px square for the pad, the mini bar
+   and the game chips, 36 px for the secondary 보조 키 pill */
+html[data-landscape="on"] .mini-game,
+html[data-landscape="on"] .mini-btn { min-height: 44px; }
+html[data-landscape="on"] .mini-btn { min-width: 44px; padding: 0 10px; font-size: 11.5px; }
+html[data-landscape="on"] .mini-game { padding: 0 12px; font-size: 11.5px; }
+html[data-landscape="on"] .mini-games { gap: 6px; }
+html[data-landscape="on"] .mini-actions { gap: 6px; }
+html[data-landscape="on"] .mini-bar { gap: 10px; }
+
+/* dark landscape: the floating controls follow Navy & Lavender instead of
+   keeping their light translucent skin (the old selector put [data-theme] on an
+   ancestor of <html>, so it never matched) */
+html[data-theme="dark"][data-landscape="on"] .pad-key {
+  background: rgba(24, 32, 58, 0.8); color: #E6E9F7;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+html[data-theme="dark"][data-landscape="on"] .pad-key span { color: #A9B6D6; }
+html[data-theme="dark"][data-landscape="on"] .pad-key.is-down,
+html[data-theme="dark"][data-landscape="on"] .pad-key.is-hot { background: var(--accent); color: #12192E; }
+html[data-theme="dark"][data-landscape="on"] .pad-more {
+  background: rgba(18, 25, 46, 0.82); color: #E6E9F7; border-color: rgba(255, 255, 255, 0.18);
+}
+html[data-theme="dark"][data-landscape="on"] .pad-extra {
+  background: rgba(11, 16, 32, 0.92); border-color: rgba(255, 255, 255, 0.18);
+}
+html[data-theme="dark"][data-landscape="on"] .mini-game,
+html[data-theme="dark"][data-landscape="on"] .mini-btn {
+  background: rgba(18, 25, 46, 0.8); color: #E6E9F7; border-color: rgba(255, 255, 255, 0.18);
+}
+html[data-theme="dark"][data-landscape="on"] .mini-game[aria-pressed="true"] { color: var(--accent-2); }
+html[data-theme="dark"][data-landscape="on"] .mini-game.is-running { background: var(--accent-2); color: #12192E; }
+html[data-theme="dark"][data-landscape="on"] .mini-exit { color: #FF9B96; }
 
 /* floating mini bar: game picker + pad + keyboard + sound + exit */
 .mini-bar {
@@ -901,6 +950,7 @@ html[data-landscape="on"] .pad[data-hidden="on"] { display: none; }
 }
 .mini-game[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-2); opacity: 1; }
 .mini-game.is-running { background: var(--accent-2); color: #FFFFFF; opacity: 1; }
+.mini-game.is-booting { border-color: var(--accent-line); color: var(--accent-2); opacity: 1; }
 .mini-actions { display: flex; align-items: center; gap: 4px; pointer-events: auto; flex: none; }
 .mini-btn {
   display: inline-flex; align-items: center; justify-content: center;

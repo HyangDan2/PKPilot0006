@@ -2,10 +2,11 @@
    HD2Lab | DOS Player — input manager
    One place owns "which DOS keys are down and why".
 
-   * every *input source* has an id (keyboard, pad:0 … pad:9, type:7, tap:12)
+   * every *input source* has an id (kbd:KeyJ, pad:0 …, type:7, tap:12)
    * a DOS key is held while at least one source holds it — reference counted
-     by a Set of source ids, so a pad release can never cut a keyboard hold
-     and a second finger on the same key never sends a duplicate keydown
+     by a Set of source ids, so a pad release can never cut a keyboard hold,
+     J and Z (both mapping to Ctrl) can be held together, and a second finger
+     on the same key never sends a duplicate keydown
    * typed characters go through a sequential queue (down → hold → up → gap),
      so "aaa" really types three letters instead of collapsing into one hold
    * a capture gate (modal, menu, unfocused UI) stops new keys and releases
@@ -39,7 +40,43 @@ export class InputManager {
     this.queueRunning = false;
     this.seq = 0;
     this.disposed = false;
-    this.stats = { downs: 0, ups: 0, queued: 0, blockedPresses: 0 };
+    /** every timeout this manager owns (taps, typed characters, queue pacing) */
+    this.timers_ = new Set();
+    /** input generation: a new game means a new queue and no leftover keys */
+    this.generation = 0;
+    this.stats = { downs: 0, ups: 0, queued: 0, blockedPresses: 0, cancelledTimers: 0 };
+  }
+
+  /** One recorded timeout; cleared by releaseAll/dispose/generation change. */
+  #later(fn, ms) {
+    const handle = this.timers.setTimeout(() => {
+      this.timers_.delete(handle);
+      fn();
+    }, ms);
+    this.timers_.add(handle);
+    return handle;
+  }
+
+  #clearTimers() {
+    for (const handle of this.timers_) {
+      try { this.timers.clearTimeout(handle); } catch (_) { /* ignore */ }
+      this.stats.cancelledTimers += 1;
+    }
+    this.timers_.clear();
+    this.queueTimer = null;
+  }
+
+  /**
+   * Move to a new input generation (called when the session generation
+   * changes). Everything the previous game still held or had queued is dropped
+   * here, so a character typed for game A can never land in game B.
+   */
+  setGeneration(generation) {
+    const next = Number(generation) || 0;
+    if (next === this.generation) return false;
+    this.generation = next;
+    this.releaseAll(`generation:${next}`);
+    return true;
   }
 
   /* ------------------------------------------------------------- capture -- */
@@ -153,6 +190,7 @@ export class InputManager {
     }
     this.sources.clear();
     this.clearQueue();
+    this.#clearTimers();
     if (count) this.#emit({ type: 'release-all', reason, count });
     return count;
   }
@@ -174,8 +212,12 @@ export class InputManager {
   tap(code, holdMs = this.tapHoldMs) {
     if (!code) return false;
     const id = `tap:${++this.seq}`;
+    const generation = this.generation;
     const started = this.press(code, id);
-    this.timers.setTimeout(() => this.release(code, id), holdMs);
+    this.#later(() => {
+      if (generation !== this.generation) return;
+      this.release(code, id);
+    }, holdMs);
     return started;
   }
 
@@ -192,15 +234,18 @@ export class InputManager {
 
   #pump() {
     if (this.queueRunning || this.disposed) return;
-    if (this.captureBlocked) { this.queue = []; return; }
+    if (this.captureBlocked) { this.clearQueue(); return; }
     const code = this.queue.shift();
     if (!code) return;
     this.queueRunning = true;
     const id = `type:${++this.seq}`;
+    const generation = this.generation;
     this.press(code, id);
-    this.timers.setTimeout(() => {
+    this.#later(() => {
+      if (generation !== this.generation) return;
       this.release(code, id);
-      this.queueTimer = this.timers.setTimeout(() => {
+      this.queueTimer = this.#later(() => {
+        if (generation !== this.generation) return;
         this.queueRunning = false;
         this.#pump();
       }, this.gapMs);
@@ -214,8 +259,9 @@ export class InputManager {
   clearQueue() {
     this.queue = [];
     this.queueRunning = false;
-    if (this.queueTimer) {
-      this.timers.clearTimeout(this.queueTimer);
+    if (this.queueTimer !== null && this.queueTimer !== undefined) {
+      try { this.timers.clearTimeout(this.queueTimer); } catch (_) { /* ignore */ }
+      this.timers_.delete(this.queueTimer);
       this.queueTimer = null;
     }
   }
@@ -223,6 +269,7 @@ export class InputManager {
   dispose() {
     this.disposed = true;
     this.clearQueue();
+    this.#clearTimers();
     this.releaseAll('dispose');
     this.listeners.clear();
   }

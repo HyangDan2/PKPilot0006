@@ -84,3 +84,35 @@ describe('LocalBundleManager lifecycle', () => {
     expect(revoked).toEqual(['blob:a.jsdos', 'blob:b.jsdos']);
   });
 });
+
+describe('LocalBundleManager across A → B → C', () => {
+  it('keeps one URL live per running bundle and never loses a URL', () => {
+    const revoked = [];
+    const bundles = new LocalBundleManager({
+      createObjectURL: (f) => `blob:${f.name}`,
+      revokeObjectURL: (url) => revoked.push(url),
+    });
+    const a = bundles.open(file('a.jsdos'));
+    const b = bundles.open(file('b.jsdos'));
+    const c = bundles.open(file('c.jsdos'));
+    expect(bundles.liveCount).toBe(3);
+
+    // A stops: its URL goes, the pending B and C stay readable
+    expect(bundles.release(a.url)).toBe(true);
+    expect(bundles.liveUrls).toEqual(['blob:b.jsdos', 'blob:c.jsdos']);
+    // B was replaced before it mounted (the session releases it itself)
+    expect(bundles.release(b.url)).toBe(true);
+    expect(bundles.liveUrls).toEqual(['blob:c.jsdos']);
+    expect(bundles.active.url).toBe('blob:c.jsdos');
+
+    // the same URL is never revoked twice
+    expect(bundles.release(a.url)).toBe(false);
+    expect(revoked).toEqual(['blob:a.jsdos', 'blob:b.jsdos']);
+
+    expect(bundles.releaseAll()).toBe(1);
+    expect(bundles.liveCount).toBe(0);
+    expect(bundles.created).toBe(3);
+    expect(bundles.revoked).toBe(3);
+    expect(bundles.order.map(([kind]) => kind)).toEqual(['create', 'create', 'create', 'revoke', 'revoke', 'revoke']);
+  });
+});

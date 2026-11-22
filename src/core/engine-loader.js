@@ -270,6 +270,16 @@ export class EngineLoader {
     return this.status();
   }
 
+  /**
+   * Abort a download that is still in flight (the player pressed 취소). A
+   * remembered failure is cleared by reset(), so the next attempt starts fresh.
+   */
+  cancel(reason = 'cancelled') {
+    if (this.state !== 'loading') return false;
+    this.#fail(new EngineError('엔진 로딩이 취소되었습니다.', reason));
+    return true;
+  }
+
   destroy() {
     this.#cleanupNodes();
     this.listeners.clear();

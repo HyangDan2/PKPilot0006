@@ -159,3 +159,78 @@ describe('InputManager teardown', () => {
     expect(manager.pendingChars).toBe(0);
   });
 });
+
+describe('InputManager physical key sources', () => {
+  it('J and Z both fire Ctrl, and lifting J keeps Ctrl down for Z', () => {
+    const { manager, sent } = makeInput();
+    // the keyboard source id is the physical key, not the device
+    manager.press('ControlLeft', 'kbd:KeyJ');
+    manager.press('ControlLeft', 'kbd:KeyZ');
+    expect(sent).toEqual([['ControlLeft', true]]);
+    expect(manager.sourcesOf('ControlLeft').sort()).toEqual(['kbd:KeyJ', 'kbd:KeyZ']);
+
+    manager.release('ControlLeft', 'kbd:KeyJ');
+    expect(manager.isHeld('ControlLeft')).toBe(true);
+    expect(sent).toEqual([['ControlLeft', true]]);
+
+    manager.release('ControlLeft', 'kbd:KeyZ');
+    expect(sent).toEqual([['ControlLeft', true], ['ControlLeft', false]]);
+  });
+
+  it('a second physical key on the same DOS key never sends a second keydown', () => {
+    const { manager, sent } = makeInput();
+    manager.press('Space', 'kbd:Space');
+    manager.press('Space', 'kbd:KeyX'); // X is mapped to Space too
+    expect(sent).toEqual([['Space', true]]);
+    manager.release('Space', 'kbd:Space');
+    manager.release('Space', 'kbd:KeyX');
+    expect(sent).toEqual([['Space', true], ['Space', false]]);
+  });
+});
+
+describe('InputManager timers and generations', () => {
+  it('releaseAll cancels a scheduled tap so it cannot fire into the next game', async () => {
+    const { manager, sent, clock } = makeInput();
+    manager.tap('Enter');
+    expect(sent).toEqual([['Enter', true]]);
+    manager.releaseAll('generation');
+    expect(clock.pending).toBe(0);
+    await clock.advance(500);
+    expect(sent).toEqual([['Enter', true], ['Enter', false]]); // only the releaseAll keyup
+  });
+
+  it('a new generation drops the queued characters of the previous one', async () => {
+    const { manager, sent, clock } = makeInput();
+    manager.typeCodes(['KeyD', 'KeyO', 'KeyO', 'KeyM']);
+    await clock.advance(61); // first character typed, the rest still queued
+    expect(sent).toEqual([['KeyD', true], ['KeyD', false]]);
+
+    manager.setGeneration(2);
+    expect(manager.pendingChars).toBe(0);
+    expect(clock.pending).toBe(0);
+    await clock.advance(1000);
+    expect(sent.map(([code]) => code)).toEqual(['KeyD', 'KeyD']); // nothing after the switch
+
+    manager.typeCodes(['KeyA']);
+    await clock.advance(200);
+    expect(sent.slice(2)).toEqual([['KeyA', true], ['KeyA', false]]);
+  });
+
+  it('setGeneration only acts when the generation really changed', () => {
+    const { manager } = makeInput();
+    manager.press('KeyW', 'kbd:KeyW');
+    expect(manager.setGeneration(0)).toBe(false);
+    expect(manager.heldCodes()).toEqual(['KeyW']);
+    expect(manager.setGeneration(1)).toBe(true);
+    expect(manager.heldCodes()).toEqual([]);
+  });
+
+  it('a typed character is released on time even if the queue is cleared', async () => {
+    const { manager, sent, clock } = makeInput();
+    manager.typeCodes(['KeyA']);
+    manager.clearQueue();
+    await clock.advance(60);
+    expect(sent).toEqual([['KeyA', true], ['KeyA', false]]);
+    expect(manager.pendingChars).toBe(0);
+  });
+});

@@ -43,14 +43,23 @@ const storage = (() => {
   }
 })();
 
+function readNumber(key, fallback) {
+  const stored = storage.getItem(key);
+  if (stored === null || stored === '') return fallback; // absent, not zero
+  const raw = Number(stored);
+  return Number.isFinite(raw) ? raw : fallback;
+}
+
 const app = {
   wasd: storage.getItem(STORAGE.wasd) !== '0',
-  muted: false,
-  volume: 1,
+  muted: storage.getItem(STORAGE.muted) === '1',
+  volume: Math.max(0, Math.min(1, readNumber(STORAGE.volume, 1))),
+  lastVolume: Math.max(0.1, Math.min(1, readNumber(STORAGE.volume, 1))) || 1,
   profile: 'arrows',
   current: null,
   lastError: null,
   localFile: null,
+  pendingLocalUrl: null,
   bootStartedAt: 0,
   bootToken: 0,
 };
@@ -109,6 +118,57 @@ function sendKey(code, down) {
   return true;
 }
 
+/* ----------------------------------------------------------------- audio --- */
+function effectiveVolume() {
+  return app.muted ? 0 : app.volume;
+}
+
+/** Push the one audio state to the emulator, the slider and the mini bar. */
+function applyAudio({ announce = false } = {}) {
+  session.setVolume(effectiveVolume());
+  view.setAudio({ volume: app.volume, muted: app.muted });
+  try {
+    storage.setItem(STORAGE.volume, String(Math.round(app.volume * 100) / 100));
+    storage.setItem(STORAGE.muted, app.muted ? '1' : '0');
+  } catch (_) { /* private mode */ }
+  if (announce) {
+    view.toast(app.muted ? '소리를 껐습니다' : `소리를 켰습니다 · ${Math.round(app.volume * 100)}%`);
+  }
+}
+
+function setVolumeLevel(level) {
+  const next = Math.max(0, Math.min(1, Number(level) || 0));
+  app.volume = next;
+  if (next > 0) {
+    app.lastVolume = next;
+    app.muted = false;
+  } else {
+    app.muted = true;
+  }
+  applyAudio();
+  return next;
+}
+
+/* --------------------------------------------------------- local bundles -- */
+/* A blob URL is claimed by the moment its boot starts and released only after
+   the runtime that reads it has stopped. A pick that is superseded before it
+   ever mounted releases its URL itself. */
+const claimedLocal = new Set();
+
+function claimLocal(target) {
+  if (target && target.local && target.url) claimedLocal.add(target.url);
+}
+
+function releaseLocal(target) {
+  if (!target || !target.local || !target.url) return false;
+  const url = target.url;
+  claimedLocal.delete(url);
+  if (app.pendingLocalUrl === url) app.pendingLocalUrl = null;
+  // called either from onAfterStop (that runtime has stopped, so nothing reads
+  // the URL any more) or for a pick that never mounted: both may release it
+  return bundles.release(url);
+}
+
 /* ----------------------------------------------------------------- session -- */
 const session = new SessionManager({
   createRuntime: ({ generation, target }) => new DosRuntime({
@@ -131,9 +191,7 @@ const session = new SessionManager({
   }),
   // stop order: keys up first, then the runtime, then the blob URL
   onBeforeStop: () => input.releaseAll('session-stop'),
-  onAfterStop: ({ target }) => {
-    if (target && target.local && target.url) bundles.release(target.url);
-  },
+  onAfterStop: ({ target }) => releaseLocal(target),
   onEvent: (event) => handleSessionEvent(event),
 });
 
@@ -159,10 +217,12 @@ function selectTarget(target) {
 
 async function startGame(target, { force = false } = {}) {
   if (!target) return { ok: false };
+  claimLocal(target);
   const token = ++app.bootToken;
   app.lastError = null;
   selectTarget(target);
   view.setPhase('booting', { message: 'DOSBox WebAssembly를 올리는 중입니다…' });
+  library.setPending(target.id);
   library.setBusy(true);
   input.releaseAll('boot');
 
@@ -171,14 +231,19 @@ async function startGame(target, { force = false } = {}) {
   try {
     await engine.load({ force: needsForce });
   } catch (error) {
+    // cancelled, or replaced by a newer pick: that request owns the UI now
+    if (token !== app.bootToken || (error && error.code === 'cancelled')) {
+      return { ok: false, cancelled: true, error };
+    }
     app.lastError = { ...error, kind: 'engine' };
+    library.setPending(null);
+    library.setBusy(false);
+    library.setRunning(null);
     view.setEngine(engine.status());
     view.setPhase('error', {
       message: friendlyError(error),
       detail: `엔진 오류 · ${error.code || 'engine'} — 다시 시도하면 다른 CDN에서 받습니다.`,
     });
-    library.setBusy(false);
-    library.setRunning(null);
     return { ok: false, error };
   }
 
@@ -188,19 +253,31 @@ async function startGame(target, { force = false } = {}) {
 
   app.bootStartedAt = Date.now();
   const outcome = await session.boot(target);
+  if (token !== app.bootToken) {
+    // a newer pick owns the screen; this one must not touch it (or keep its URL)
+    if (!outcome.ok) releaseLocal(target);
+    return { ...outcome, cancelled: true };
+  }
   if (outcome.ok) {
     saveLast(target.id);
     return outcome;
   }
-  if (outcome.stale) return outcome;
+  if (outcome.stale) {
+    releaseLocal(target);
+    return outcome;
+  }
   app.lastError = outcome.error ? { ...outcome.error, kind: 'boot' } : null;
   return outcome;
 }
 
 function handleSessionEvent(event) {
+  // a late event from a generation that is no longer current must not repaint
+  if (typeof event.generation === 'number' && event.generation !== session.generation) return;
   switch (event.type) {
     case 'booting':
+      input.setGeneration(event.generation);
       library.setBusy(true);
+      library.setPending(event.target ? event.target.id : null);
       view.setPhase('booting');
       view.setEngine(engine.status());
       break;
@@ -209,10 +286,15 @@ function handleSessionEvent(event) {
       break;
     case 'running': {
       const target = event.target;
+      input.setGeneration(event.generation);
       library.setBusy(false);
+      library.setPending(null);
       library.setRunning(target.id);
       view.setPhase('running');
       view.setEngine({ ...engine.status(), state: 'running' });
+      // a game change or restart keeps the player's audio settings
+      applyAudio();
+      view.focusStage();
       if (target) saveLast(target.id);
       const ms = app.bootStartedAt ? Math.round((Date.now() - app.bootStartedAt) / 100) / 10 : null;
       view.toast(`${target.name} 부팅 완료${ms ? ` · ${ms}s` : ''} — 바로 플레이하세요`);
@@ -221,6 +303,7 @@ function handleSessionEvent(event) {
     case 'error': {
       const error = event.error || {};
       library.setBusy(false);
+      library.setPending(null);
       library.setRunning(null);
       app.lastError = { ...error, kind: error.code === 'cancelled' ? 'cancelled' : 'boot' };
       if (error.code === 'cancelled') {
@@ -237,9 +320,10 @@ function handleSessionEvent(event) {
     }
     case 'idle':
       library.setBusy(false);
+      library.setPending(null);
       library.setRunning(null);
       view.setEngine(engine.status());
-      if (view.phase === 'booting') view.setPhase('idle');
+      if (view.phase === 'booting' || view.phase === 'running') view.setPhase('idle');
       break;
     default:
       break;
@@ -256,9 +340,25 @@ async function retry() {
   // a local bundle URL was revoked when its runtime stopped: open the file again
   if (target && target.local && app.localFile) {
     const reopened = bundles.open(app.localFile);
-    if (reopened.ok) return startGame(reopened.target, { force });
+    if (reopened.ok) {
+      app.pendingLocalUrl = reopened.url;
+      return startGame(reopened.target, { force });
+    }
   }
   return startGame(target, { force });
+}
+
+async function cancelBoot() {
+  app.bootToken += 1; // anything still waiting on the engine is now stale
+  library.setPending(null);
+  library.setBusy(false);
+  view.setPhase('idle');
+  if (engine.cancel('cancelled')) {
+    engine.reset();
+    view.setEngine(engine.status());
+  }
+  await session.stop('cancel');
+  input.releaseAll('cancel');
 }
 
 /* ------------------------------------------------------------ file input -- */
@@ -274,7 +374,13 @@ function handleFile(file) {
     library.note(opened.message || '파일을 열지 못했습니다.', 'warn');
     return;
   }
+  // a file that never reached the emulator releases its URL right away
+  const previous = app.pendingLocalUrl;
   app.localFile = file;
+  app.pendingLocalUrl = opened.url;
+  if (previous && previous !== opened.url && !claimedLocal.has(previous)) {
+    bundles.release(previous);
+  }
   library.note(`${file.name} · ${formatSize(file.size)} · 브라우저 안에서만 실행`, 'ok');
   startGame(opened.target);
 }
@@ -282,10 +388,7 @@ function handleFile(file) {
 /* --------------------------------------------------------------- controls -- */
 view.bind({
   onPlay: () => startGame(app.current || GAMES[0]),
-  onCancel: () => {
-    app.bootToken += 1; // anything still waiting on the engine is now stale
-    session.stop('cancel');
-  },
+  onCancel: () => cancelBoot(),
   onRetry: () => retry(),
   onRestart: () => {
     if (!app.current) { view.toast('먼저 게임을 고르세요', 'warn'); return; }
@@ -293,27 +396,15 @@ view.bind({
     startGame(app.current);
   },
   onMute: () => toggleMute(),
-  onVolume: (value) => {
-    const level = Math.max(0, Math.min(1, value / 100));
-    app.volume = level;
-    app.muted = level === 0;
-    view.setMuted(app.muted);
-    session.setVolume(level);
-  },
+  onVolume: (value) => setVolumeLevel(Number(value) / 100),
   onFullscreen: () => toggleFullscreen(),
   onExitFullscreen: () => exitFullscreen(),
 });
 
 function toggleMute() {
   app.muted = !app.muted;
-  view.setMuted(app.muted);
-  session.setVolume(app.muted ? 0 : app.volume || 1);
-  const mini = $('miniMuteBtn');
-  if (mini) {
-    mini.setAttribute('aria-pressed', String(app.muted));
-    mini.textContent = app.muted ? '🔇' : '🔊';
-  }
-  view.toast(app.muted ? '소리를 껐습니다' : '소리를 켰습니다');
+  if (!app.muted && app.volume === 0) app.volume = app.lastVolume || 1;
+  applyAudio({ announce: true });
 }
 
 async function toggleFullscreen() {
@@ -347,8 +438,18 @@ const keyboard = new KeyboardInput({
   store: keymapStore,
   getProfile: () => app.profile,
   isWasdEnabled: () => app.wasd,
+  // the page keeps its keyboard until a game runs, and any focused UI control
+  // keeps its own keys while it does
+  isCapturing: () => session.running,
   onActivity: (code, down) => flashPad(code, down),
 }).attach();
+
+/* clicking the picture hands the keyboard back to the emulator; the overlay is
+   a sibling of the stage, so its buttons keep their own focus and keys */
+const stageEl = $('dosStage');
+if (stageEl) {
+  stageEl.addEventListener('pointerdown', () => { view.focusStage({ force: true }); }, { passive: true });
+}
 
 function flashPad(code, down) {
   const pad = $('pad');
@@ -391,6 +492,9 @@ const settings = new SettingsDialog({
   store: keymapStore,
   onOpen: () => { input.block('settings'); renderLegend(); },
   onClose: () => { input.unblock('settings'); renderLegend(); },
+  // a player closing the panel gets the keyboard back on the picture; a
+  // keyboard user who opened it idle keeps focus on the trigger button
+  onAfterClose: () => { if (session.running) view.focusStage({ force: true }); },
   onChanged: () => renderLegend(),
 }).bind();
 
@@ -553,16 +657,49 @@ else {
 selectTarget(initial);
 view.setPhase('idle');
 view.setPadHidden(false);
+view.setAudio({ volume: app.volume, muted: app.muted });
 
 /* the first click on the overlay is a user gesture: boot without an autoplay block */
 const warm = () => engine.load().then(() => view.setEngine(engine.status())).catch(() => view.setEngine(engine.status()));
 if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 2500 });
 else setTimeout(warm, 1200);
 
+/* ------------------------------------------------------------- lifecycle -- */
+/* Leaving the page stops the emulator first and only then drops its blob URL:
+   the runtime must never be reading a URL that has already been revoked. A
+   page that comes back from the back/forward cache is checked, because the
+   instance it left behind is gone. */
+let leaving = null;
+
 window.addEventListener('pagehide', () => {
   input.releaseAll('pagehide');
-  bundles.releaseAll();
+  if (view.phase === 'running' || view.phase === 'booting' || session.runtime) {
+    leaving = session.stop('pagehide').then(() => {
+      bundles.releaseAll();
+      return true;
+    }).catch(() => false);
+  } else {
+    bundles.releaseAll();
+  }
 });
+
+window.addEventListener('pageshow', (event) => {
+  const canvas = view.el.stage ? view.el.stage.querySelector('canvas') : null;
+  const stale = session.state === 'running' && !canvas;
+  if (!stale && !event.persisted) return;
+  if (stale) {
+    session.stop('pageshow');
+    library.setBusy(false);
+    library.setRunning(null);
+    library.setPending(null);
+    view.setPhase('idle', { message: '페이지로 돌아왔습니다. 다시 실행해 주세요.' });
+    view.setEngine(engine.status());
+    view.toast('페이지를 떠나면서 실행이 종료되었습니다 — 다시 실행해 주세요', 'warn');
+  }
+  if (leaving) { leaving = null; }
+  view.setAudio({ volume: app.volume, muted: app.muted });
+});
+
 window.addEventListener('beforeunload', () => {
   input.releaseAll('unload');
 });
@@ -575,7 +712,7 @@ window.__pkpilot = {
   state: app,
   boot: startGame,
   retry,
-  cancel: () => session.stop('cancel'),
+  cancel: () => cancelBoot(),
   press: (code) => input.press(code, 'debug'),
   release: (code) => input.release(code, 'debug'),
   releaseAll: () => input.releaseAll('debug'),
@@ -589,6 +726,10 @@ window.__pkpilot = {
   setKey: (actionId, slot, code) => keymapStore.assign(actionId, slot, code),
   openKeymap: () => settings.open(),
   closeKeymap: () => settings.close(),
+  setVolume: (value) => setVolumeLevel(value),
+  toggleMute,
+  focusStage: () => view.focusStage(),
+  bundles,
   isTouch: responsive.touch,
   input,
   session,
@@ -599,12 +740,23 @@ window.__pkpilot = {
   snapshot: () => ({
     session: session.snapshot(),
     engine: engine.status(),
-    input: { held: input.heldCodes(), blocked: input.captureBlocked, queued: input.pendingChars },
+    input: {
+      held: input.heldCodes(),
+      blocked: input.captureBlocked,
+      queued: input.pendingChars,
+      generation: input.generation,
+      sources: Object.fromEntries(input.heldCodes().map((code) => [code, input.sourcesOf(code)])),
+    },
     phase: view.phase,
     target: app.current ? app.current.id : null,
     keymap: keymapStore.map,
     wasd: app.wasd,
+    volume: app.volume,
     muted: app.muted,
+    effectiveVolume: effectiveVolume(),
+    audio: { ...view.audio },
+    bundles: { live: bundles.liveCount, created: bundles.created, revoked: bundles.revoked },
+    focus: document.activeElement ? (document.activeElement.id || document.activeElement.tagName.toLowerCase()) : null,
   }),
 };
 window.__pkpilotReady = true;

@@ -57,9 +57,19 @@ export class LocalBundleManager {
   } = {}) {
     this.createObjectURL = createObjectURL;
     this.revokeObjectURL = revokeObjectURL;
-    this.active = null; // { url, name }
+    this.active = null; // the newest bundle opened
+    this.live = new Map(); // url -> { name, size } : every URL that may still be read
     this.created = 0;
     this.revoked = 0;
+    this.order = []; // ["create", url] / ["revoke", url] in call order
+  }
+
+  get liveCount() {
+    return this.live.size;
+  }
+
+  get liveUrls() {
+    return Array.from(this.live.keys());
   }
 
   open(file) {
@@ -67,6 +77,8 @@ export class LocalBundleManager {
     if (!verdict.ok) return verdict;
     const url = this.createObjectURL(file);
     this.created += 1;
+    this.live.set(url, { name: file.name, size: file.size });
+    this.order.push(['create', url]);
     this.active = { url, name: file.name, size: file.size };
     return { ok: true, url, target: localTargetFor(file, url) };
   }
@@ -74,15 +86,23 @@ export class LocalBundleManager {
   /** Revoke one URL (the session calls this after its runtime stopped). */
   release(url) {
     const target = url || (this.active && this.active.url);
-    if (!target) return false;
+    if (!target || !this.live.has(target)) return false;
     try { this.revokeObjectURL(target); } catch (_) { return false; }
-    if (this.active && this.active.url === target) this.active = null;
+    this.live.delete(target);
+    this.order.push(['revoke', target]);
     this.revoked += 1;
+    if (this.active && this.active.url === target) {
+      const last = Array.from(this.live.keys()).pop() || null;
+      this.active = last ? { url: last, ...this.live.get(last) } : null;
+    }
     return true;
   }
 
   releaseAll() {
-    if (!this.active) return false;
-    return this.release(this.active.url);
+    let count = 0;
+    for (const url of Array.from(this.live.keys())) {
+      if (this.release(url)) count += 1;
+    }
+    return count;
   }
 }

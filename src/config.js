@@ -38,4 +38,6 @@ export const STORAGE = Object.freeze({
   wasd: 'pkpilot0006:wasd',
   keymap: 'pkpilot0006:keymap',
   padForce: 'pkpilot0006:padforce',
+  volume: 'pkpilot0006:volume',
+  muted: 'pkpilot0006:muted',
 });
