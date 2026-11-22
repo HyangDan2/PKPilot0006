@@ -105,7 +105,16 @@ export class KeyboardInput {
 
   onDown(event) {
     if (!event || event.__pkpilot) return false;
-    if (!this.claims(event)) return false;
+    if (!this.claims(event)) {
+      // a focused field or control owns this key: keep js-dos' own listener from
+      // eating it (Space on a button would otherwise never activate it), but let
+      // the page's default action run
+      if (this.isCapturing() && !this.manager.captureBlocked
+        && (this.isEditable(event.target) || this.belongsToControl(event))) {
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+      }
+      return false;
+    }
     const code = this.resolve(event.code);
     if (!code) return false;
     if (event.cancelable !== false) event.preventDefault();
@@ -123,7 +132,14 @@ export class KeyboardInput {
     const sourceId = this.sourceIdFor(event.code);
     // only lift what this physical key actually holds: a keyup that belongs to
     // a text field or to another control must not be swallowed
-    if (!this.manager.sourcesOf(code).includes(sourceId)) return false;
+    if (!this.manager.sourcesOf(code).includes(sourceId)) {
+      if (this.isCapturing() && !this.manager.captureBlocked
+        && (this.isEditable(event.target) || this.belongsToControl(event))
+        && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+      }
+      return false;
+    }
     if (event.cancelable !== false) event.preventDefault();
     if (typeof event.stopPropagation === 'function') event.stopPropagation();
     this.manager.release(code, sourceId);
