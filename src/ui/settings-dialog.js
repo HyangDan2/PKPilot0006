@@ -29,6 +29,7 @@ export class SettingsDialog {
     this.returnFocus = null;
     this.doc = dialog ? dialog.ownerDocument : document;
     this.bound = false;
+    this.handledOpen = false;
   }
 
   get open_() {
@@ -226,6 +227,7 @@ export class SettingsDialog {
     this.returnFocus = this.doc.activeElement;
     this.render();
     this.note('');
+    this.handledOpen = true;
     this.onOpen();
     if (typeof this.dialog.showModal === 'function') this.dialog.showModal();
     else this.dialog.setAttribute('open', '');
@@ -240,12 +242,21 @@ export class SettingsDialog {
     this.paint();
     if (typeof this.dialog.close === 'function') this.dialog.close();
     else this.dialog.removeAttribute('open');
+    // the native `close` event is queued: release the capture gate now so the
+    // very next key press reaches the game again
+    this.#finish();
     return true;
+  }
+
+  #finish() {
+    if (!this.handledOpen) return;
+    this.handledOpen = false;
+    this.onClose();
   }
 
   #afterClose() {
     this.listening = null;
-    this.onClose();
+    this.#finish();
     const back = this.returnFocus && this.returnFocus.focus && this.doc.contains(this.returnFocus)
       ? this.returnFocus
       : this.doc.getElementById('keymapBtn');
