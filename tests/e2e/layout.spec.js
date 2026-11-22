@@ -3,6 +3,54 @@ import { installEngine, waitReady } from './util.js';
 
 const WIDTHS = [320, 360, 390, 414, 768, 1024, 1280, 1440];
 
+async function measureContrast(page) {
+  return page.evaluate(() => {
+    const parse = (color) => {
+      const match = color.match(/rgba?\(([^)]+)\)/);
+      if (!match) return null;
+      const parts = match[1].split(',').map((value) => parseFloat(value));
+      return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
+    };
+    const channel = (value) => {
+      const c = value / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = (c) => 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+    const contrast = (fg, bg) => {
+      const l1 = luminance(fg);
+      const l2 = luminance(bg);
+      const [light, dark] = l1 > l2 ? [l1, l2] : [l2, l1];
+      return (light + 0.05) / (dark + 0.05);
+    };
+    // walk up for the first opaque background
+    const backdrop = (el) => {
+      let node = el;
+      while (node) {
+        const bg = parse(getComputedStyle(node).backgroundColor);
+        if (bg && bg.a > 0.9) return bg;
+        node = node.parentElement;
+      }
+      return parse(getComputedStyle(document.body).backgroundColor) || { r: 255, g: 255, b: 255, a: 1 };
+    };
+    const targets = [
+      ['h1', 3.0], ['.player-lede', 4.5], ['.card-blurb', 4.5], ['.card-meta', 4.5],
+      ['.bar-btn', 4.5], ['.primary-btn', 4.5], ['.state-chip', 4.5], ['.panel-foot', 4.5],
+      ['.disclosure > summary', 4.5], ['.section-head p', 4.5], ['.game-card .card-title', 4.5],
+    ];
+    const failures = [];
+    for (const [selector, minimum] of targets) {
+      const el = document.querySelector(selector);
+      if (!el || el.offsetParent === null) continue;
+      const cs = getComputedStyle(el);
+      const fg = parse(cs.color);
+      if (!fg) continue;
+      const ratio = contrast(fg, backdrop(el));
+      if (ratio < minimum) failures.push(`${selector}: ${ratio.toFixed(2)} < ${minimum}`);
+    }
+    return failures;
+  });
+}
+
 test.describe('layout', () => {
   test('no horizontal overflow from 320 px to 1440 px', async ({ page }) => {
     await installEngine(page);
@@ -95,6 +143,20 @@ test.describe('layout', () => {
     await expect(page.locator('#muteBtn')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('#wasdBtn')).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('.game-card[data-game="digger"]')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('text contrast meets WCAG AA in both themes', async ({ page }) => {
+    await installEngine(page);
+    await page.goto('/');
+    await waitReady(page);
+
+    const measure = async () => measureContrast(page);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((value) => window.HD2Theme.set(value, { persist: false }), theme);
+      await page.waitForTimeout(120);
+      const failures = await measure();
+      expect(failures, `contrast failures in ${theme}`).toEqual([]);
+    }
   });
 
   test('the page keeps its SEO and share metadata', async ({ page }) => {

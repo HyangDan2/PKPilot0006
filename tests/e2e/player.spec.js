@@ -212,3 +212,47 @@ test.describe('player runtime', () => {
     expect(keys.at(-1)).toEqual([265, false]); // the mapped ArrowUp was lifted
   });
 });
+
+test.describe('local bundle', () => {
+  test('a dropped .jsdos runs and a replacement revokes the old Blob URL', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__revoked = [];
+      const original = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = (url) => { window.__revoked.push(url); return original(url); };
+    });
+    await installEngine(page);
+    await page.goto('/');
+    await waitReady(page);
+
+    const first = { name: 'my-game.jsdos', mimeType: 'application/zip', buffer: Buffer.from('PK\u0003\u0004first-bundle') };
+    await page.setInputFiles('#fileInput', first);
+    await page.waitForFunction(() => {
+      const snap = window.__pkpilot.snapshot();
+      return snap.session.state === 'running' && snap.target === 'local';
+    }, null, { timeout: 20000 });
+    const firstBoot = (await stub(page)).boots.at(-1);
+    expect(firstBoot).toMatch(/^blob:/);
+    await expect(page.locator('#fileNote')).toContainText('my-game.jsdos');
+
+    const second = { name: 'other.zip', mimeType: 'application/zip', buffer: Buffer.from('PK\u0003\u0004second-bundle') };
+    await page.setInputFiles('#fileInput', second);
+    await page.waitForFunction(() => window.__stub.boots.length >= 2, null, { timeout: 20000 });
+    await page.waitForFunction(() => window.__pkpilot.snapshot().session.state === 'running', null, { timeout: 20000 });
+
+    const boots = (await stub(page)).boots;
+    expect(boots).toHaveLength(2);
+    expect(boots[1]).toMatch(/^blob:/);
+    expect(boots[1]).not.toBe(boots[0]);
+    const revoked = await page.evaluate(() => window.__revoked);
+    expect(revoked).toContain(boots[0]);
+  });
+
+  test('a file that is not a bundle is refused with a reason', async ({ page }) => {
+    await installEngine(page);
+    await page.goto('/');
+    await waitReady(page);
+    await page.setInputFiles('#fileInput', { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') });
+    await expect(page.locator('#fileNote')).toContainText('.jsdos 또는 .zip');
+    expect((await stub(page)).boots).toHaveLength(0);
+  });
+});
