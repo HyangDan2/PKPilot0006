@@ -1,0 +1,20 @@
+{
+  "name": "pkpilot0006-dos-player",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "HD2Lab DOS Player — js-dos v8 instant-play shell, static on GitHub Pages",
+  "scripts": {
+    "serve": "node tools/serve.mjs",
+    "check": "node tools/static-check.mjs",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "test": "node tools/static-check.mjs && vitest run && playwright test",
+    "thumbs": "node tools/capture-thumbs.mjs",
+    "shots": "node tools/shots.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "vitest": "^3.2.7"
+  }
+}

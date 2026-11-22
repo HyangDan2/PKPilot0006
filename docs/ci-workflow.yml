@@ -1,0 +1,59 @@
+# PKPilot0006 CI — ready to enable.
+#
+# This file lives in docs/ instead of .github/workflows/ because the GitHub App
+# that pushes for the user is not allowed to create or update workflow files
+# ("refusing to allow a GitHub App to create or update workflow
+# .github/workflows/ci.yml without workflows permission", HTTP 403 on push).
+#
+# To turn it on, either copy this file to .github/workflows/ci.yml and push with
+# an account/token that has the `workflows` scope, or paste it into the GitHub
+# web editor (Actions → New workflow). Nothing else changes: it runs the same
+# commands as `npm test`.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: static · unit · e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Static checks (files, imports, DOM ids, pinned engine)
+        run: node tools/static-check.mjs
+
+      - name: Unit tests (Vitest)
+        run: npx vitest run
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E tests (Playwright, engine stubbed)
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: .playwright-artifacts
+          retention-days: 7
