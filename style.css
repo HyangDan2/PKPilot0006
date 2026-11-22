@@ -27,10 +27,12 @@
   --text: #1D192B;
   --text-body: #544E68;
   --muted: #68627A;
-  --muted-2: #8B8598;
+  /* 4.6:1 on --surface: secondary text still has to clear WCAG AA */
+  --muted-2: #6F6883;
 
   --accent: #8B6CE8;
   --accent-2: #6B4CD6;
+  --accent-strong: #5A3DC6;
   --accent-soft: #F1ECFE;
   --accent-line: #D6C9F6;
 
@@ -78,6 +80,7 @@
 
   --accent: #A78BFA;
   --accent-2: #C4B5FD;
+  --accent-strong: #B9A5FF;
   --accent-soft: rgba(167, 139, 250, 0.14);
   --accent-line: #344472;
 
@@ -335,14 +338,15 @@ code, kbd { font-family: var(--mono); }
 .ghost-btn:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .primary-btn {
   border-color: transparent;
-  background: var(--accent);
+  background: var(--accent-2);
   color: #FFFFFF;
   font-weight: 750;
 }
 .primary-btn .ic { fill: currentColor; stroke: none; }
-.primary-btn:hover { background: var(--accent-2); transform: translateY(-1px); }
+.primary-btn:hover { background: var(--accent-strong); transform: translateY(-1px); }
 .primary-btn:active, .ghost-btn:active { transform: translateY(0) scale(0.99); }
-[data-theme="dark"] .primary-btn { color: #0B1020; }
+[data-theme="dark"] .primary-btn { background: var(--accent); color: #0B1020; }
+[data-theme="dark"] .primary-btn:hover { background: var(--accent-strong); }
 .ghost-btn.small, .primary-btn.small { min-height: 34px; padding: 0 12px; font-size: 12.5px; }
 .overlay-hint {
   margin: 2px 0 0; font-size: 11px; line-height: 1.5; color: var(--muted-2);
@@ -665,7 +669,7 @@ html[data-touch="off"] .pad:not([data-force="on"]) { display: none; }
 .card-run {
   position: absolute; top: 10px; right: 10px;
   padding: 3px 8px; border-radius: 999px;
-  background: var(--accent); color: #FFFFFF;
+  background: var(--accent-2); color: #FFFFFF;
   font-size: 9.5px; font-weight: 750; letter-spacing: 0.2px;
   opacity: 0; transform: translateY(-3px);
   transition: opacity 0.2s, transform 0.2s;
@@ -780,7 +784,7 @@ html[data-touch="off"] .pad:not([data-force="on"]) { display: none; }
 .keyslot:hover { border-color: var(--border-strong); color: var(--text); }
 .keyslot[data-bound="no"] { color: var(--muted-2); border-style: dashed; }
 .keyslot.is-listening {
-  border-color: var(--accent); background: var(--accent); color: #FFFFFF;
+  border-color: var(--accent-2); background: var(--accent-2); color: #FFFFFF;
   animation: keyslot-pulse 1.1s ease-in-out infinite;
 }
 @keyframes keyslot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
@@ -896,7 +900,7 @@ html[data-landscape="on"] .pad[data-hidden="on"] { display: none; }
   opacity: 0.8;
 }
 .mini-game[aria-pressed="true"] { border-color: var(--accent); color: var(--accent-2); opacity: 1; }
-.mini-game.is-running { background: var(--accent); color: #FFFFFF; opacity: 1; }
+.mini-game.is-running { background: var(--accent-2); color: #FFFFFF; opacity: 1; }
 .mini-actions { display: flex; align-items: center; gap: 4px; pointer-events: auto; flex: none; }
 .mini-btn {
   display: inline-flex; align-items: center; justify-content: center;
